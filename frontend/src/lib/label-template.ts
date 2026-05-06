@@ -8,6 +8,7 @@
  *   **bold**               — <strong> text
  *   *italic*               — <em> text (single asterisk, not part of **)
  *   ==inverse==            — inverted text (black bg, white text)
+ *   @@inverse@@            — inverted text using filament color with automatic black/white text
  *   [size=120]text[/size]  — inline relative size in percent (50..300)
  *   [size=120%]text[/size] — same as above; percent sign is optional
  *   {color_swatch[8]}      — inline color bar using filament.color_hex; width is in ch units (default 1)
@@ -33,7 +34,8 @@ export interface SpoolData {
 
 const SWATCH_MARKER_RE = /^\[\[FM_SWATCH\|(\d{1,3})\|(#[0-9A-F]{6})\]\]$/
 
-function normalizeHexColor(raw: unknown): string | null {
+export function normalizeHexColor(raw: unknown): string | null {
+
   if (raw === undefined || raw === null) return null
   const hex = String(raw).trim().replace(/^#/, '')
   if (!hex) return null
@@ -43,6 +45,22 @@ function normalizeHexColor(raw: unknown): string | null {
   }
   if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex.toUpperCase()}`
   return null
+}
+
+export function getReadableTextColor(backgroundHex: string | null): '#000' | '#fff' {
+  if (!backgroundHex) return '#fff'
+  const hex = backgroundHex.replace('#', '')
+  const rgb = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255)
+  const linear = rgb.map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+  const luminance = (0.2126 * linear[0]) + (0.7152 * linear[1]) + (0.0722 * linear[2])
+  const contrastWithBlack = (luminance + 0.05) / 0.05
+  const contrastWithWhite = 1.05 / (luminance + 0.05)
+  return contrastWithBlack >= contrastWithWhite ? '#000' : '#fff'
+}
+
+function getFilamentColorTheme(data: SpoolData): { background: string; foreground: '#000' | '#fff' } {
+  const background = normalizeHexColor(data['filament.color_hex']) ?? '#000000'
+  return { background, foreground: getReadableTextColor(background) }
 }
 
 function parseColorSwatchToken(token: string): number | null {
@@ -98,11 +116,11 @@ export function renderTemplateText(template: string, data: SpoolData): string {
   )
 }
 
-/** Apply **bold**, *italic*, ==inverse== and [size=..] inline markup. */
-function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
+/** Apply **bold**, *italic*, ==inverse==, @@inverse@@ and [size=..] inline markup. */
+function applyMarkup(text: string, frag: DocumentFragment | HTMLElement, data: SpoolData): void {
   // Regex: match swatch marker, [size=NNN]...[/size] (case-insensitive),
-  // bold (**…**), italic (*…*), inverse (==…==)
-  const regex = /(\[\[FM_SWATCH\|\d{1,3}\|#[0-9A-F]{6}\]\]|\[size=\d{1,3}%?\][\s\S]*?\[\/size\]|\*\*[\s\S]*?\*\*|\*(?!\*)([\s\S]*?)\*(?!\*)|==[\s\S]*?==)/gi
+  // bold (**…**), italic (*…*), inverse (==…==), filament inverse (@@…@@)
+  const regex = /(\[\[FM_SWATCH\|\d{1,3}\|#[0-9A-F]{6}\]\]|\[size=\d{1,3}%?\][\s\S]*?\[\/size\]|\*\*[\s\S]*?\*\*|\*(?!\*)([\s\S]*?)\*(?!\*)|==[\s\S]*?==|@@[\s\S]*?@@)/gi
   let last = 0
 
   const appendPlainText = (raw: string, container: DocumentFragment | HTMLElement) => {
@@ -143,7 +161,7 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
         const pct = Math.max(50, Math.min(300, Number(rawPct)))
         const el = document.createElement('span')
         el.style.fontSize = `${pct}%`
-        applyMarkup(inner, el)
+        applyMarkup(inner, el, data)
         frag.appendChild(el)
       } else {
         appendPlainText(part, frag)
@@ -151,7 +169,7 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
     } else if (part.startsWith('**') && part.endsWith('**')) {
       const inner = part.slice(2, -2)
       const el = document.createElement('strong')
-      applyMarkup(inner, el)
+      applyMarkup(inner, el, data)
       frag.appendChild(el)
     } else if (part.startsWith('==') && part.endsWith('==')) {
       const inner = part.slice(2, -2)
@@ -160,12 +178,22 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
       el.style.color = '#fff'
       el.style.padding = '0 0.6mm'
       el.style.display = 'inline-block'
-      applyMarkup(inner, el)
+      applyMarkup(inner, el, data)
+      frag.appendChild(el)
+    } else if (part.startsWith('@@') && part.endsWith('@@')) {
+      const inner = part.slice(2, -2)
+      const theme = getFilamentColorTheme(data)
+      const el = document.createElement('span')
+      el.style.backgroundColor = theme.background
+      el.style.color = theme.foreground
+      el.style.padding = '0 0.6mm'
+      el.style.display = 'inline-block'
+      applyMarkup(inner, el, data)
       frag.appendChild(el)
     } else if (part.startsWith('*') && part.endsWith('*')) {
       const inner = part.slice(1, -1)
       const el = document.createElement('em')
-      applyMarkup(inner, el)
+      applyMarkup(inner, el, data)
       frag.appendChild(el)
     }
 
@@ -185,6 +213,6 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
 export function parseTemplate(template: string, data: SpoolData): DocumentFragment {
   const plainText = renderTemplateText(template, data)
   const frag = document.createDocumentFragment()
-  applyMarkup(plainText, frag)
+  applyMarkup(plainText, frag, data)
   return frag
 }

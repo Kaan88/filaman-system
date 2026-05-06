@@ -1736,7 +1736,7 @@ const { id } = Astro.params
 </style>
 
 <script>
-  import { parseTemplate, renderTemplateText } from '../../../lib/label-template'
+  import { getReadableTextColor, normalizeHexColor, parseTemplate, renderTemplateText } from '../../../lib/label-template'
   import type { SpoolData } from '../../../lib/label-template'
 
   // Global print function for Safari compatibility
@@ -2228,7 +2228,7 @@ const { id } = Astro.params
   // Template syntax popover
   const SYNTAX_HTML = `
     <button class="ds-popover-close" title="Close">✕</button>
-    <h4>Template syntax</h4>
+    <h4>Print Format Syntax</h4>
     <table>
       <tr><td>{token}</td><td>Insert token value — chips show short labels, the <code>filament.</code> prefix is added automatically when clicked<br><span class="ds-popover-eg">e.g. type → inserts {filament.type} → TPU</span></td></tr>
       <tr><td>{text{token}text}</td><td>Wrap token with literal text — the whole thing is hidden if the token is empty<br><span class="ds-popover-eg">e.g. {Ext: {filament.extruder_temp}°C} → Ext: 210°C, or nothing if temp is unset</span></td></tr>
@@ -2237,6 +2237,7 @@ const { id } = Astro.params
       <tr><td>**text**</td><td><strong>Bold</strong></td></tr>
       <tr><td>*text*</td><td><em>Italic</em></td></tr>
       <tr><td>==text==</td><td style="background:#000;color:#fff;padding:0 2px;border-radius:2px">Inverse (white on black)</td></tr>
+      <tr><td>@@text@@</td><td>Inverse using filament color with automatic black/white text chosen for best contrast.<br><span class="ds-popover-eg"><span style="background:#2A5BE8;color:#fff;padding:0 2px;border-radius:2px">Blue uses white text</span> <span style="background:#F5E663;color:#000;padding:0 2px;border-radius:2px">Yellow uses black text</span></span></td></tr>
       <tr><td>\\n</td><td>New line (in info textarea, just press Enter)</td></tr>
     </table>`
 
@@ -3447,14 +3448,22 @@ const { id } = Astro.params
       titleEl.style.textOverflow = cfg.fitToWidth ? 'clip' : 'ellipsis'
       titleEl.style.color = 'black'
 
-      // If the whole title template is wrapped in ==...==,
-      // render it as a full-row inverse block (not only glyph-bounded inverse spans).
-      const rowInverseMatch = cfg.template.trim().match(/^==([\s\S]*?)==$/)
-      const rowInverseEnabled = !!rowInverseMatch
-      const renderTemplate = rowInverseEnabled && rowInverseMatch ? rowInverseMatch[1] : cfg.template
+      // If the whole title template is wrapped in ==...== or @@...@@,
+      // render it as a full-row inverse block instead of glyph-bounded inverse spans.
+      const trimmedTemplate = cfg.template.trim()
+      const rowInverseMatch = trimmedTemplate.match(/^==([\s\S]*?)==$/)
+      const rowColorInverseMatch = trimmedTemplate.match(/^@@([\s\S]*?)@@$/)
+      const rowInverseEnabled = !!(rowInverseMatch || rowColorInverseMatch)
+      const renderTemplate = rowInverseMatch ? rowInverseMatch[1] : rowColorInverseMatch ? rowColorInverseMatch[1] : cfg.template
       if (rowInverseEnabled) {
-        titleEl.style.backgroundColor = '#000'
-        titleEl.style.color = '#fff'
+        if (rowColorInverseMatch) {
+          const bg = normalizeHexColor(data['filament.color_hex']) ?? '#000000'
+          titleEl.style.backgroundColor = bg
+          titleEl.style.color = getReadableTextColor(bg)
+        } else {
+          titleEl.style.backgroundColor = '#000'
+          titleEl.style.color = '#fff'
+        }
         titleEl.style.display = 'block'
         titleEl.style.width = '100%'
         titleEl.style.boxSizing = 'border-box'
