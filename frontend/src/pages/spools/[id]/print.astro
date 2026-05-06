@@ -1881,6 +1881,7 @@ const { id } = Astro.params
   // All available tokens for the token-chip hints
   // label = short display text; token = what gets inserted into the template
   const DESIGNER_TOKENS: { token: string; label: string }[] = [
+    { token: '{color_swatch[1]}',      label: 'color_swatch[1]' },
     { token: '{filament.id}',           label: 'id' },
     { token: '{filament.name}',         label: 'name' },
     { token: '{filament.type}',         label: 'type' },
@@ -2200,6 +2201,7 @@ const { id } = Astro.params
     <table>
       <tr><td>{token}</td><td>Insert token value — chips show short labels, the <code>filament.</code> prefix is added automatically when clicked<br><span class="ds-popover-eg">e.g. type → inserts {filament.type} → TPU</span></td></tr>
       <tr><td>{text{token}text}</td><td>Wrap token with literal text — the whole thing is hidden if the token is empty<br><span class="ds-popover-eg">e.g. {Ext: {filament.extruder_temp}°C} → Ext: 210°C, or nothing if temp is unset</span></td></tr>
+      <tr><td>{color_swatch[1]}</td><td>Inline color swatch from <code>filament.color_hex</code>; width defaults to <code>1ch</code> and can be set with brackets, e.g. <code>{color_swatch[10]}</code> (1..40). It also scales inside <code>[size=...]...[/size]</code> blocks.<br><span class="ds-popover-eg">e.g. [size=120%]{color_swatch[10]}[/size] {filament.color} → <span style="display:inline-block;width:10ch;height:0.82em;background:#2A5BE8;border:1px solid rgba(0,0,0,0.28);border-radius:0.14em;vertical-align:baseline;margin:0 0.2ch;"></span> Blue</span></td></tr>
       <tr><td>[size=120%]text[/size]</td><td>Inline relative text size in % (50..300, % optional)<br><span class="ds-popover-eg">e.g. [size=140%]Nozzle:[/size] 240-270°C or [size=140]Nozzle:[/size]</span></td></tr>
       <tr><td>**text**</td><td><strong>Bold</strong></td></tr>
       <tr><td>*text*</td><td><em>Italic</em></td></tr>

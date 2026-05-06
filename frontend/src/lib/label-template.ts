@@ -10,6 +10,7 @@
  *   ==inverse==            — inverted text (black bg, white text)
  *   [size=120]text[/size]  — inline relative size in percent (50..300)
  *   [size=120%]text[/size] — same as above; percent sign is optional
+ *   {color_swatch[8]}      — inline color bar using filament.color_hex; width is in ch units (default 1)
  *   \n                     — line-break (<br>)
  *
  * SpoolData is a flat object passed from the print page; the "extra" key holds
@@ -28,6 +29,35 @@ export interface SpoolData {
   'filament.weight': string | number
   extra?: Record<string, string>
   [key: string]: unknown
+}
+
+const SWATCH_MARKER_RE = /^\[\[FM_SWATCH\|(\d{1,3})\|(#[0-9A-F]{6})\]\]$/
+
+function normalizeHexColor(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null
+  const hex = String(raw).trim().replace(/^#/, '')
+  if (!hex) return null
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    const [a, b, c] = hex.split('')
+    return `#${(a + a + b + b + c + c).toUpperCase()}`
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex.toUpperCase()}`
+  return null
+}
+
+function parseColorSwatchToken(token: string): number | null {
+  const m = token.trim().match(/^color(?:-|_)swatch(?:\[(\d{1,3})\])?$/i)
+  if (!m) return null
+  const width = m[1] ? Number(m[1]) : 1
+  return Math.max(1, Math.min(40, width))
+}
+
+function renderColorSwatchMarker(token: string, data: SpoolData): string | null {
+  const widthCh = parseColorSwatchToken(token)
+  if (widthCh === null) return null
+  const hex = normalizeHexColor(data['filament.color_hex'])
+  if (!hex) return ''
+  return `[[FM_SWATCH|${widthCh}|${hex}]]`
 }
 
 /** Resolve a dot-path token against the spool data object. */
@@ -53,11 +83,15 @@ export function renderTemplateText(template: string, data: SpoolData): string {
       const optional = match.match(/^\{(.*?)\{([^{}]+)\}(.*?)\}$/)
       if (optional) {
         const [, prefix, token, suffix] = optional
+        const swatchMarker = renderColorSwatchMarker(token, data)
+        if (swatchMarker !== null) return swatchMarker === '' ? '' : prefix + swatchMarker + suffix
         const resolved = resolveToken(token, data)
         return resolved === '?' ? '' : prefix + resolved + suffix
       }
       // Simple token: {token}
       const token = match.slice(1, -1)
+      const swatchMarker = renderColorSwatchMarker(token, data)
+      if (swatchMarker !== null) return swatchMarker
       const resolved = resolveToken(token, data)
       return resolved === '?' ? '' : resolved
     }
@@ -66,9 +100,9 @@ export function renderTemplateText(template: string, data: SpoolData): string {
 
 /** Apply **bold**, *italic*, ==inverse== and [size=..] inline markup. */
 function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
-  // Regex: match [size=NNN]...[/size] or [size=NNN%]...[/size] (case-insensitive),
+  // Regex: match swatch marker, [size=NNN]...[/size] (case-insensitive),
   // bold (**…**), italic (*…*), inverse (==…==)
-  const regex = /(\[size=\d{1,3}%?\][\s\S]*?\[\/size\]|\*\*[\s\S]*?\*\*|\*(?!\*)([\s\S]*?)\*(?!\*)|==[\s\S]*?==)/gi
+  const regex = /(\[\[FM_SWATCH\|\d{1,3}\|#[0-9A-F]{6}\]\]|\[size=\d{1,3}%?\][\s\S]*?\[\/size\]|\*\*[\s\S]*?\*\*|\*(?!\*)([\s\S]*?)\*(?!\*)|==[\s\S]*?==)/gi
   let last = 0
 
   const appendPlainText = (raw: string, container: DocumentFragment | HTMLElement) => {
@@ -89,7 +123,20 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement): void {
 
     const part = match[0]
 
-    if (/^\[size=/i.test(part) && /\[\/size\]$/i.test(part)) {
+    const swatch = part.match(SWATCH_MARKER_RE)
+    if (swatch) {
+      const [, widthCh, hex] = swatch
+      const el = document.createElement('span')
+      el.style.display = 'inline-block'
+      el.style.width = `${Number(widthCh)}ch`
+      el.style.height = '0.82em'
+      el.style.backgroundColor = hex
+      el.style.borderRadius = '0.14em'
+      el.style.border = '1px solid rgba(0,0,0,0.28)'
+      el.style.verticalAlign = 'baseline'
+      el.style.margin = '0 0.2ch'
+      frag.appendChild(el)
+    } else if (/^\[size=/i.test(part) && /\[\/size\]$/i.test(part)) {
       const sized = part.match(/^\[size=(\d{1,3})%?\]([\s\S]*?)\[\/size\]$/i)
       if (sized) {
         const [, rawPct, inner] = sized
