@@ -3551,8 +3551,11 @@ const { id } = Astro.params
       logoBox.style.alignItems = 'center'
       logoBox.style.justifyContent = logoAlign === 'center' ? 'center' : logoAlign === 'right' ? 'flex-end' : 'flex-start'
       if (s.logo.scaleToFit) {
-        logoImg.style.height = '100%'
-        logoImg.style.width = '100%'
+        // Fit within bounds while keeping intrinsic aspect size so horizontal
+        // justification (left/center/right) still has visible effect.
+        logoImg.style.height = 'auto'
+        logoImg.style.width = 'auto'
+        logoImg.style.maxHeight = '100%'
         logoImg.style.maxWidth = '100%'
       } else {
         logoImg.style.height = logoManualPx + 'px'
