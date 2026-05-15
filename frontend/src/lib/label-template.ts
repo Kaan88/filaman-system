@@ -33,6 +33,8 @@ export interface SpoolData {
 }
 
 const SWATCH_MARKER_RE = /^\[\[FM_SWATCH\|(\d{1,3})\|(#[0-9A-F]{6})\]\]$/
+const MAX_TEMPLATE_CHARS = 8000
+const MAX_MARKUP_CHARS = 12000
 
 export function normalizeHexColor(raw: unknown): string | null {
 
@@ -92,9 +94,12 @@ function resolveToken(token: string, data: SpoolData): string {
 
 /** Expand {token} and {prefix{token}suffix} placeholders to plain text. */
 export function renderTemplateText(template: string, data: SpoolData): string {
+  const boundedTemplate = template.length > MAX_TEMPLATE_CHARS
+    ? template.slice(0, MAX_TEMPLATE_CHARS)
+    : template
   // Match both optional-block {{inner}} style and simple {token}
   // Process longest matches first (optional blocks) before simple tokens.
-  return template.replace(
+  return boundedTemplate.replace(
     /{(?:[^{}]|{[^{}]*})*}/g,
     (match) => {
       // Optional block: {prefix{token}suffix}
@@ -213,6 +218,10 @@ function applyMarkup(text: string, frag: DocumentFragment | HTMLElement, data: S
 export function parseTemplate(template: string, data: SpoolData): DocumentFragment {
   const plainText = renderTemplateText(template, data)
   const frag = document.createDocumentFragment()
+  if (plainText.length > MAX_MARKUP_CHARS) {
+    frag.appendChild(document.createTextNode(plainText.slice(0, MAX_MARKUP_CHARS)))
+    return frag
+  }
   applyMarkup(plainText, frag, data)
   return frag
 }

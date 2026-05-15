@@ -1774,8 +1774,71 @@ const { id } = Astro.params
   let extraFields: {key: string, label: string, value: string, source?: string}[] = []
   try {
     const stored = sessionStorage.getItem('filaman-label-extra-fields')
-    if (stored) extraFields = JSON.parse(stored)
+    if (stored) {
+      const parsed = JSON.parse(stored)
+      if (Array.isArray(parsed)) {
+        extraFields = parsed.filter((item) => (
+          item &&
+          typeof item.key === 'string' &&
+          typeof item.label === 'string' &&
+          typeof item.value === 'string'
+        ))
+      }
+    }
   } catch(e) { /* ignore */ }
+
+  const MM_TO_PX = 96 / 25.4
+  const PRINT_DPI = 600
+  const STORAGE_SOFT_LIMIT_BYTES = 4_500_000
+
+  function safeSetLocalStorage(key: string, value: string) {
+    if (value.length > STORAGE_SOFT_LIMIT_BYTES) {
+      console.warn(`Skipped persisting ${key}: payload too large`) 
+      return false
+    }
+    try {
+      localStorage.setItem(key, value)
+      return true
+    } catch (error) {
+      console.warn(`Failed to persist ${key}`, error)
+      return false
+    }
+  }
+
+  function parseJsonOrNull(raw: string | null): any | null {
+    if (!raw) return null
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+
+  function clampNumber(value: number, min: number, max: number, fallback: number) {
+    if (!Number.isFinite(value)) return fallback
+    return Math.min(max, Math.max(min, value))
+  }
+
+  function clampInputValue(input: HTMLInputElement, min: number, max: number, fallback: number, decimals = 2) {
+    const next = clampNumber(Number(input.value), min, max, fallback)
+    const normalized = Number(next.toFixed(decimals))
+    input.value = String(normalized)
+    return normalized
+  }
+
+  function buildSafeQrUrl(linkMode: 'spool'|'url', templateBase: string, spoolId: string | number) {
+    if (linkMode === 'url' && templateBase.trim()) {
+      try {
+        const url = new URL(templateBase.trim())
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('invalid protocol')
+        const path = url.pathname.replace(/\/+$/, '')
+        return `${url.origin}${path}/spools/${encodeURIComponent(String(spoolId))}`
+      } catch {
+        // Fall through to safe default
+      }
+    }
+    return `${window.location.origin}/spools/${encodeURIComponent(String(spoolId))}`
+  }
 
   // Flat SpoolData object consumed by the template parser (Phase 3)
   // Keys match the {token} names used in designer templates.
@@ -1803,10 +1866,10 @@ const { id } = Astro.params
   }
 
   // DOM references
-  const widthInput = document.getElementById('input-width')
-  const heightInput = document.getElementById('input-height')
-  const fontSizeInput = document.getElementById('input-font-size')
-  const qrSizeInput = document.getElementById('input-qr-size')
+  const widthInput = document.getElementById('input-width') as HTMLInputElement
+  const heightInput = document.getElementById('input-height') as HTMLInputElement
+  const fontSizeInput = document.getElementById('input-font-size') as HTMLInputElement
+  const qrSizeInput = document.getElementById('input-qr-size') as HTMLInputElement
   const checkLogo = document.getElementById('check-logo') as HTMLInputElement
   const checkQR = document.getElementById('check-qr') as HTMLInputElement
   const checkID = document.getElementById('check-id') as HTMLInputElement
@@ -1814,19 +1877,20 @@ const { id } = Astro.params
   const checkMat = document.getElementById('check-mat') as HTMLInputElement
   const checkColor = document.getElementById('check-color') as HTMLInputElement
   const checkColorSwatch = document.getElementById('check-color-swatch') as HTMLInputElement
-  const labelPreview = document.getElementById('label-preview')
-  const qrContainer = document.getElementById('label-qr-container')
+  const labelPreview = document.getElementById('label-preview') as HTMLElement
+  const qrContainer = document.getElementById('label-qr-container') as HTMLElement
 
   const LABEL_SETTINGS_KEY = 'filaman-label-settings'
   const ACTIVE_TAB_KEY = 'filaman-label-active-tab'
 
   // --- Tab switching ---
   const tabBtns = document.querySelectorAll<HTMLButtonElement>('.tab-btn')
-  const tabPanelPrint = document.getElementById('tab-panel-print')
-  const tabPanelDesigner = document.getElementById('tab-panel-designer')
+  const tabPanelPrint = document.getElementById('tab-panel-print') as HTMLElement | null
+  const tabPanelDesigner = document.getElementById('tab-panel-designer') as HTMLElement | null
   const resetBtn = document.getElementById('btn-reset') as HTMLButtonElement | null
 
   function activateTab(tab: 'print' | 'designer') {
+    if (!tabPanelPrint || !tabPanelDesigner || !labelPreview) return
     tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab))
     tabPanelPrint.style.display = tab === 'print' ? '' : 'none'
     tabPanelDesigner.style.display = tab === 'designer' ? '' : 'none'
@@ -1859,6 +1923,7 @@ const { id } = Astro.params
   // ─── Label Designer ────────────────────────────────────────────────────────
 
   const DESIGNER_KEY = 'filaman-label-designer-v1'
+  const DESIGNER_SCHEMA_VERSION = 1
 
   interface LabelDesignerSettings {
     logo:   { show: boolean; spaceMm: number; scaleToFit: boolean; manualSizeMm: number; align: 'left'|'center'|'right' }
@@ -1879,6 +1944,44 @@ const { id } = Astro.params
     info:   { show: true, sizeMm: 2.5, hAlign: 'left', vAlign: 'bottom',
               template: '{filament.material}\n{filament.color}\nExt: {filament.extruder_temp}°C\nBed: {filament.bed_temp}°C' },
     info2:  { show: false, vsep: false, sizeMm: 2.5, hAlign: 'left', vAlign: 'bottom', template: '' },
+  }
+
+  function mergeDesignerSettings(raw: any): LabelDesignerSettings {
+    const candidate = raw && typeof raw === 'object' ? raw : {}
+    return {
+      ...DESIGNER_DEFAULTS,
+      ...candidate,
+      logo:  { ...DESIGNER_DEFAULTS.logo,  ...(candidate.logo ?? {}) },
+      label: { ...DESIGNER_DEFAULTS.label, ...(candidate.label ?? {}) },
+      title: { ...DESIGNER_DEFAULTS.title, ...(candidate.title ?? {}) },
+      title2: { ...DESIGNER_DEFAULTS.title2, ...(candidate.title2 ?? {}) },
+      qr: normalizeQrSettings(candidate.qr),
+      info:  { ...DESIGNER_DEFAULTS.info,  ...(candidate.info ?? {}) },
+      info2: { ...DESIGNER_DEFAULTS.info2, ...(candidate.info2 ?? {}) },
+    }
+  }
+
+  function loadDesignerSettingsFromStorage(): LabelDesignerSettings {
+    const parsed = parseJsonOrNull(localStorage.getItem(DESIGNER_KEY))
+    if (!parsed) return DESIGNER_DEFAULTS
+    try {
+      if (typeof parsed.version === 'number' && parsed.version >= DESIGNER_SCHEMA_VERSION && parsed.settings) {
+        return mergeDesignerSettings(parsed.settings)
+      }
+      // Backward compatibility for older flat payloads
+      return mergeDesignerSettings(parsed)
+    } catch {
+      localStorage.removeItem(DESIGNER_KEY)
+      return DESIGNER_DEFAULTS
+    }
+  }
+
+  function persistDesignerSettings(settings: LabelDesignerSettings) {
+    const payload = JSON.stringify({
+      version: DESIGNER_SCHEMA_VERSION,
+      settings,
+    })
+    safeSetLocalStorage(DESIGNER_KEY, payload)
   }
 
   function normalizeQrSettings(rawQr: any): LabelDesignerSettings['qr'] {
@@ -1931,9 +2034,9 @@ const { id } = Astro.params
         align:  (document.getElementById('ds-logo-align-group') as HTMLElement).dataset.value as 'left'|'center'|'right',
       },
       label: {
-        width:  Number((document.getElementById('ds-width') as HTMLInputElement).value),
-        height: Number((document.getElementById('ds-height') as HTMLInputElement).value),
-        marginMm: Number((document.getElementById('ds-margin') as HTMLInputElement).value),
+        width:  clampNumber(Number((document.getElementById('ds-width') as HTMLInputElement).value), 20, 300, DESIGNER_DEFAULTS.label.width),
+        height: clampNumber(Number((document.getElementById('ds-height') as HTMLInputElement).value), 10, 200, DESIGNER_DEFAULTS.label.height),
+        marginMm: clampNumber(Number((document.getElementById('ds-margin') as HTMLInputElement).value), 0, 6, DESIGNER_DEFAULTS.label.marginMm),
         border: (document.getElementById('ds-border') as HTMLInputElement).checked,
       },
       title: {
@@ -1959,7 +2062,7 @@ const { id } = Astro.params
       qr: {
         show:        (document.getElementById('ds-qr-show') as HTMLInputElement).checked,
         mode:        (document.getElementById('ds-qr-mode') as HTMLSelectElement).value as 'simple'|'logo'|'colorLogo',
-        sizeMm:      Number((document.getElementById('ds-qr-size') as HTMLInputElement).value),
+        sizeMm:      clampNumber(Number((document.getElementById('ds-qr-size') as HTMLInputElement).value), 8, 40, DESIGNER_DEFAULTS.qr.sizeMm),
         position:    (document.getElementById('ds-qr-pos-group') as HTMLElement).dataset.value as 'left'|'right',
         vAlign:      (document.getElementById('ds-qr-valign-group') as HTMLElement).dataset.value as 'top'|'center'|'bottom',
         linkMode:    (document.getElementById('ds-qr-link-group') as HTMLElement).dataset.value as 'spool'|'url',
@@ -1981,28 +2084,11 @@ const { id } = Astro.params
         template: (document.getElementById('ds-info2-tpl') as HTMLTextAreaElement).value,
       },
     }
-    localStorage.setItem(DESIGNER_KEY, JSON.stringify(s))
+    persistDesignerSettings(s)
   }
 
   function loadDesignerSettings() {
-    let s: LabelDesignerSettings = DESIGNER_DEFAULTS
-    try {
-      const raw = localStorage.getItem(DESIGNER_KEY)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        s = {
-          ...DESIGNER_DEFAULTS,
-          ...parsed,
-          logo:  { ...DESIGNER_DEFAULTS.logo,  ...parsed.logo },
-          label: { ...DESIGNER_DEFAULTS.label, ...parsed.label },
-          title: { ...DESIGNER_DEFAULTS.title, ...parsed.title },
-          title2: { ...DESIGNER_DEFAULTS.title2, ...(parsed.title2 ?? {}) },
-          qr:    normalizeQrSettings(parsed.qr),
-          info:  { ...DESIGNER_DEFAULTS.info,  ...parsed.info },
-          info2: { ...DESIGNER_DEFAULTS.info2, ...parsed.info2 },
-        }
-      }
-    } catch { /* ignore */ }
+    let s: LabelDesignerSettings = loadDesignerSettingsFromStorage()
 
     const rawLogo = (s as any).logo ?? {}
     const logoSpaceMm = Number(rawLogo.spaceMm ?? rawLogo.sizeMm ?? DESIGNER_DEFAULTS.logo.spaceMm)
@@ -2182,6 +2268,14 @@ const { id } = Astro.params
   const dsInputIds = ['ds-width','ds-height','ds-margin','ds-logo-space','ds-logo-manual','ds-title-size','ds-title-gap','ds-title2-size','ds-title2-gap','ds-qr-size','ds-info-size','ds-info2-size','ds-title-tpl','ds-title2-tpl','ds-qr-url-tpl','ds-info-tpl','ds-info2-tpl']
   const dsCheckIds = ['ds-border','ds-logo-show','ds-logo-fit','ds-title-show','ds-title-fit','ds-divider-above','ds-divider-below','ds-title2-show','ds-title2-fit','ds-title2-divider-above','ds-title2-divider-below','ds-qr-show','ds-info-show','ds-info2-show','ds-info2-vsep']
   const dsSelectIds = ['ds-qr-mode']
+  let designerPreviewDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleDesignerPreview = () => {
+    if (designerPreviewDebounceTimer) clearTimeout(designerPreviewDebounceTimer)
+    designerPreviewDebounceTimer = setTimeout(() => {
+      saveDesignerSettings()
+      updateDesignerPreview()
+    }, 120)
+  }
   ;[...dsInputIds, ...dsCheckIds, ...dsSelectIds].forEach(id => {
     document.getElementById(id)?.addEventListener('change', () => { saveDesignerSettings(); updateDesignerPreview() })
   })
@@ -2202,8 +2296,7 @@ const { id } = Astro.params
     if (el && (el as HTMLInputElement).type !== 'checkbox') {
       el.addEventListener('input', () => {
         if (id === 'ds-title-tpl' || id === 'ds-title2-tpl') autosizeTemplateField(id)
-        saveDesignerSettings()
-        updateDesignerPreview()
+        scheduleDesignerPreview()
       })
     }
   })
@@ -2427,6 +2520,7 @@ const { id } = Astro.params
   // ─── Presets ──────────────────────────────────────────────────────────────
 
   const PRESETS_KEY = 'filaman-label-presets-v1'
+  const PRESETS_SCHEMA_VERSION = 1
 
   interface LabelPreset {
     name: string
@@ -2434,15 +2528,31 @@ const { id } = Astro.params
   }
 
   function loadPresets(): LabelPreset[] {
+    const parsed = parseJsonOrNull(localStorage.getItem(PRESETS_KEY))
+    if (!parsed) return []
     try {
-      const raw = localStorage.getItem(PRESETS_KEY)
-      if (raw) return JSON.parse(raw) as LabelPreset[]
-    } catch { /* ignore */ }
-    return []
+      const payload = Array.isArray(parsed)
+        ? { version: 0, presets: parsed }
+        : parsed
+      if (!Array.isArray(payload.presets)) return []
+      return payload.presets
+        .filter((p: any) => p && typeof p.name === 'string' && p.settings)
+        .map((p: any) => ({
+          name: p.name.trim().slice(0, 120),
+          settings: mergeDesignerSettings(p.settings),
+        }))
+    } catch {
+      localStorage.removeItem(PRESETS_KEY)
+      return []
+    }
   }
 
   function savePresets(presets: LabelPreset[]) {
-    localStorage.setItem(PRESETS_KEY, JSON.stringify(presets))
+    const payload = JSON.stringify({
+      version: PRESETS_SCHEMA_VERSION,
+      presets,
+    })
+    safeSetLocalStorage(PRESETS_KEY, payload)
   }
 
   // Track which preset is currently loaded (for dirty detection)
@@ -2534,26 +2644,7 @@ const { id } = Astro.params
     if (!name) return
     const presets = loadPresets()
     const idx = presets.findIndex(p => p.name === name)
-    const settings = (() => {
-      try {
-        const raw = localStorage.getItem(DESIGNER_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          return {
-            ...DESIGNER_DEFAULTS,
-            ...parsed,
-            logo:  { ...DESIGNER_DEFAULTS.logo,  ...parsed.logo },
-            label: { ...DESIGNER_DEFAULTS.label, ...parsed.label },
-            title: { ...DESIGNER_DEFAULTS.title, ...parsed.title },
-            title2: { ...DESIGNER_DEFAULTS.title2, ...(parsed.title2 ?? {}) },
-            qr:    normalizeQrSettings(parsed.qr),
-            info:  { ...DESIGNER_DEFAULTS.info,  ...parsed.info },
-            info2: { ...DESIGNER_DEFAULTS.info2, ...(parsed.info2 ?? {}) },
-          } as LabelDesignerSettings
-        }
-      } catch { /* ignore */ }
-      return DESIGNER_DEFAULTS
-    })()
+    const settings = loadDesignerSettingsFromStorage()
     if (idx >= 0) {
       presets[idx].settings = settings
     } else {
@@ -2853,13 +2944,10 @@ const { id } = Astro.params
   const extraFieldChecks: {key: string, label: string, value: string, checkbox: HTMLInputElement}[] = []
 
   let savedExtraFieldSettings: Record<string, boolean> = {}
-  try {
-    const saved = localStorage.getItem(LABEL_SETTINGS_KEY)
-    if (saved) {
-      const s = JSON.parse(saved)
-      if (s.extraFields) savedExtraFieldSettings = s.extraFields
-    }
-  } catch(e) { /* ignore */ }
+  const parsedClassicSettings = parseJsonOrNull(localStorage.getItem(LABEL_SETTINGS_KEY))
+  if (parsedClassicSettings?.extraFields && typeof parsedClassicSettings.extraFields === 'object') {
+    savedExtraFieldSettings = parsedClassicSettings.extraFields as Record<string, boolean>
+  }
 
   if (extraFields.length > 0) {
     extraFieldsTitle.style.display = ''
@@ -2913,26 +3001,27 @@ const { id } = Astro.params
         return acc
       }, {} as Record<string, boolean>)
     }
-    localStorage.setItem(LABEL_SETTINGS_KEY, JSON.stringify(settings))
+    safeSetLocalStorage(LABEL_SETTINGS_KEY, JSON.stringify(settings))
   }
 
   function loadSettings() {
-    try {
-      const saved = localStorage.getItem(LABEL_SETTINGS_KEY)
-      if (!saved) return
-      const s = JSON.parse(saved)
-      if (s.width) (widthInput as HTMLInputElement).value = s.width
-      if (s.height) (heightInput as HTMLInputElement).value = s.height
-      if (s.fontSize) (fontSizeInput as HTMLInputElement).value = s.fontSize
-      if (s.qrSize) (qrSizeInput as HTMLInputElement).value = s.qrSize
-      if (s.showLogo !== undefined) checkLogo.checked = s.showLogo
-      if (s.showQR !== undefined) checkQR.checked = s.showQR
-      if (s.showID !== undefined) checkID.checked = s.showID
-      if (s.showMfr !== undefined) checkMfr.checked = s.showMfr
-      if (s.showMat !== undefined) checkMat.checked = s.showMat
-      if (s.showColor !== undefined) checkColor.checked = s.showColor
-      if (s.showColorSwatch !== undefined) checkColorSwatch.checked = s.showColorSwatch
-    } catch (e) { /* ignore corrupt data */ }
+    const s = parseJsonOrNull(localStorage.getItem(LABEL_SETTINGS_KEY))
+    if (!s || typeof s !== 'object') return
+    if (s.width !== undefined) widthInput.value = String(s.width)
+    if (s.height !== undefined) heightInput.value = String(s.height)
+    if (s.fontSize !== undefined) fontSizeInput.value = String(s.fontSize)
+    if (s.qrSize !== undefined) qrSizeInput.value = String(s.qrSize)
+    clampInputValue(widthInput, 20, 200, 60, 0)
+    clampInputValue(heightInput, 10, 120, 40, 0)
+    clampInputValue(fontSizeInput, 50, 200, 100, 0)
+    clampInputValue(qrSizeInput, 8, 40, 18, 1)
+    if (s.showLogo !== undefined) checkLogo.checked = !!s.showLogo
+    if (s.showQR !== undefined) checkQR.checked = !!s.showQR
+    if (s.showID !== undefined) checkID.checked = !!s.showID
+    if (s.showMfr !== undefined) checkMfr.checked = !!s.showMfr
+    if (s.showMat !== undefined) checkMat.checked = !!s.showMat
+    if (s.showColor !== undefined) checkColor.checked = !!s.showColor
+    if (s.showColorSwatch !== undefined) checkColorSwatch.checked = !!s.showColorSwatch
   }
 
   loadSettings()
@@ -3151,10 +3240,13 @@ const { id } = Astro.params
 
     ensureClassicPreviewLayout()
 
-    const w = (widthInput as HTMLInputElement).value
-    const h = (heightInput as HTMLInputElement).value
-    const qrSize = (qrSizeInput as HTMLInputElement).value
-    const fontSizeBase = parseInt((fontSizeInput as HTMLInputElement).value) / 100
+    const widthMm = clampInputValue(widthInput, 20, 200, 60, 0)
+    const heightMm = clampInputValue(heightInput, 10, 120, 40, 0)
+    const qrSizeMm = clampInputValue(qrSizeInput, 8, 40, 18, 1)
+    const fontSizeBase = clampInputValue(fontSizeInput, 50, 200, 100, 0) / 100
+    const w = String(widthMm)
+    const h = String(heightMm)
+    const qrSize = String(qrSizeMm)
 
     labelPreview.style.border = 'none'
     labelPreview.style.padding = ''
@@ -3281,7 +3373,7 @@ const { id } = Astro.params
     if (checkQR.checked) {
       qrContainer.innerHTML = ''
       const url = window.location.origin + '/spools/' + labelData.id
-      const qrPx = Math.min(1024, Math.max(256, Math.round(parseFloat(qrSize) * (600 / 25.4))))
+      const qrPx = Math.min(1024, Math.max(256, Math.round(qrSizeMm * (PRINT_DPI / 25.4))))
 
       // @ts-ignore
       new QRCode(qrContainer, {
@@ -3355,32 +3447,13 @@ const { id } = Astro.params
       })
     }
 
-    const s = (() => {
-      try {
-        const raw = localStorage.getItem(DESIGNER_KEY)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          return {
-            ...DESIGNER_DEFAULTS,
-            ...parsed,
-            logo:  { ...DESIGNER_DEFAULTS.logo,  ...parsed.logo },
-            label: { ...DESIGNER_DEFAULTS.label, ...parsed.label },
-            title: { ...DESIGNER_DEFAULTS.title, ...parsed.title },
-            title2: { ...DESIGNER_DEFAULTS.title2, ...(parsed.title2 ?? {}) },
-            qr:    normalizeQrSettings(parsed.qr),
-            info:  { ...DESIGNER_DEFAULTS.info,  ...parsed.info },
-            info2: { ...DESIGNER_DEFAULTS.info2, ...parsed.info2 },
-          }
-        }
-      } catch { /* ignore */ }
-      return DESIGNER_DEFAULTS
-    })()
+    const s = loadDesignerSettingsFromStorage()
 
     const data = buildSpoolData() as SpoolData
 
     // --- Size & border ---
-    const w = s.label.width
-    const h = s.label.height
+    const w = clampNumber(Number(s.label.width), 20, 300, DESIGNER_DEFAULTS.label.width)
+    const h = clampNumber(Number(s.label.height), 10, 200, DESIGNER_DEFAULTS.label.height)
     const marginMm = Math.max(0, Number(s.label.marginMm ?? DESIGNER_DEFAULTS.label.marginMm))
     const borderWidthMm = 0.3
     const borderTextGapMm = borderWidthMm
@@ -3421,8 +3494,8 @@ const { id } = Astro.params
       const logoAny = (s.logo ?? {}) as any
       const logoSpaceMm = Number(logoAny.spaceMm ?? logoAny.sizeMm ?? DESIGNER_DEFAULTS.logo.spaceMm)
       const logoManualMm = Number(logoAny.manualSizeMm ?? logoAny.sizeMm ?? DESIGNER_DEFAULTS.logo.manualSizeMm)
-      const logoSpacePx = Math.max(1, Math.round(logoSpaceMm * 3.7795))
-      const logoManualPx = Math.max(1, Math.round(logoManualMm * 3.7795))
+      const logoSpacePx = Math.max(1, Math.round(logoSpaceMm * MM_TO_PX))
+      const logoManualPx = Math.max(1, Math.round(logoManualMm * MM_TO_PX))
       const logoBox = document.createElement('div')
       logoBox.style.width = '100%'
       logoBox.style.height = logoSpacePx + 'px'
@@ -3604,14 +3677,8 @@ const { id } = Astro.params
       qrWrap.style.height = s.qr.sizeMm + 'mm'
       qrWrap.style.alignSelf = s.qr.vAlign === 'top' ? 'flex-start' : s.qr.vAlign === 'center' ? 'center' : 'flex-end'
 
-      const qrUrl = s.qr.linkMode === 'url' && s.qr.urlTemplate.trim()
-        ? (() => {
-            const base = s.qr.urlTemplate.trim().replace(/\/+$/, '')
-            // User provides only base URL; we append /spools/<id>.
-            return `${base}/spools/${encodeURIComponent(String(labelData.id))}`
-          })()
-        : window.location.origin + '/spools/' + labelData.id
-      const qrPx = Math.min(1024, Math.max(256, Math.round(s.qr.sizeMm * (600 / 25.4))))
+      const qrUrl = buildSafeQrUrl(s.qr.linkMode, s.qr.urlTemplate, labelData.id)
+      const qrPx = Math.min(1024, Math.max(256, Math.round(s.qr.sizeMm * (PRINT_DPI / 25.4))))
 
       // @ts-ignore
       new QRCode(qrWrap, {
