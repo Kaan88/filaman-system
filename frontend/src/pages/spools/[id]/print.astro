@@ -1917,6 +1917,8 @@ const { id } = Astro.params
       const isStale = beginPreviewRender('print')
       // Force reset of classic layout detection before building print preview
       labelPreview.innerHTML = ''
+      labelPreview.style.border = 'none'
+      labelPreview.style.padding = ''
       updatePreview(isStale)
     }
   }
@@ -3463,6 +3465,8 @@ const { id } = Astro.params
           min-height: ${h}mm !important;
           max-width: ${w}mm !important;
           max-height: ${h}mm !important;
+          transform: none !important;
+          transform-origin: unset !important;
         }
       }
     `
@@ -3772,6 +3776,8 @@ const { id } = Astro.params
           width: ${w}mm !important; height: ${h}mm !important;
           min-width: ${w}mm !important; min-height: ${h}mm !important;
           max-width: ${w}mm !important; max-height: ${h}mm !important;
+          transform: none !important;
+          transform-origin: unset !important;
         }
       }
     `
