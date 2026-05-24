@@ -575,9 +575,32 @@ async def driver_health(
     printer_id: int,
     db: DBSession,
     principal: PrincipalDep,
+    refresh: int | None = Query(None),
 ):
     driver = plugin_manager.drivers.get(printer_id)
     if driver:
+        if refresh:
+            refresh_status = getattr(driver, "refresh_status", None)
+            if callable(refresh_status):
+                try:
+                    refresh_payload = refresh_status()
+                    if inspect.isawaitable(refresh_payload):
+                        refresh_payload = await refresh_payload
+                    if isinstance(refresh_payload, dict):
+                        active_spool_id = refresh_payload.get("active_spool_id")
+                        await plugin_manager._handle_slots_update(
+                            printer_id,
+                            [],
+                            None,
+                            active_spool_id,
+                        )
+                except Exception:
+                    logger.debug(
+                        "driver_health refresh failed for printer %s",
+                        printer_id,
+                        exc_info=True,
+                    )
+
         health = driver.health()
         # Primary worker: update shared memory so secondaries stay in sync
         shared_health_store.publish({printer_id: health})

@@ -1202,6 +1202,20 @@ const { id } = Astro.params
           .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled' && r.value != null && r.value.health?.connected)
           .map(r => r.value)
 
+        // Force a direct Moonraker status refresh via backend before loading
+        // DB slot assignments. This ensures active spool changes made outside
+        // FilaMan are visible immediately on page load.
+        await Promise.allSettled(
+          onlinePrinters.map(async ({ printer }) => {
+            try {
+              await fetch(`/api/v1/printers/${printer.id}/driver/health?refresh=1`, {
+                credentials: 'include',
+                signal: getAbortSignal()
+              })
+            } catch {}
+          })
+        )
+
         // Fetch DB slot assignments for all online printers
         const dbSlotsByPrinter: Record<string, any> = {}
         await Promise.allSettled(
@@ -1634,6 +1648,15 @@ const { id } = Astro.params
     }
 
     // --- SSE Auto-Update (via shared Layout.astro connection) ---
+    let pendingOverviewReload: number | null = null
+    function queueOverviewReload() {
+      if (pendingOverviewReload != null) return
+      pendingOverviewReload = window.setTimeout(async () => {
+        pendingOverviewReload = null
+        await loadPrinterSlotOverview()
+      }, 200)
+    }
+
     window.addEventListener('filaman:data-changed', async (e: Event) => {
       const data = (e as CustomEvent).detail
       if (data.event === 'slots_update') {
@@ -1642,12 +1665,12 @@ const { id } = Astro.params
           resolveSlotAssign('success')
         } else if (!pendingSlotAssign) {
           // No pending assign — just reload slot overview as usual
-          await loadPrinterSlotOverview()
+          queueOverviewReload()
         }
         // If pending but wrong printer_id → ignore, let polling handle it
       } else if (data.event === 'printer_update' && !pendingSlotAssign) {
         // Slot assignments or active spool state may have changed.
-        await loadPrinterSlotOverview()
+        queueOverviewReload()
       }
     })
 

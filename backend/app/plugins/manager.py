@@ -84,7 +84,10 @@ class PluginManager:
 
         if event_type == "slots_update":
             await self._handle_slots_update(
-                printer_id, event.get("slots", []), event.get("ams_info")
+                printer_id,
+                event.get("slots", []),
+                event.get("ams_info"),
+                event.get("active_spool_id"),
             )
         elif event_type == "printer_status":
             # Forward printer status to frontend (heartbeat)
@@ -112,12 +115,15 @@ class PluginManager:
         return hash(slot_index) % 10000
 
     async def _handle_slots_update(
-        self, printer_id: int, slots_data: list[dict], ams_info: dict | None = None
+        self,
+        printer_id: int,
+        slots_data: list[dict],
+        ams_info: dict | None = None,
+        active_spool_id_raw: Any | None = None,
     ) -> None:
         """Upsert PrinterSlot and PrinterSlotAssignment from driver slot events."""
         try:
-            active_spool_id_raw = None
-            if isinstance(ams_info, dict):
+            if active_spool_id_raw is None and isinstance(ams_info, dict):
                 active_spool_id_raw = ams_info.get("active_spool_id")
 
             active_spool_id: int | None = None
@@ -205,7 +211,10 @@ class PluginManager:
                             )
                             db.add(assignment)
 
-                        if slot_index == "0-0":
+                        slot_kind = str(slot_data.get("slot_kind") or "").lower()
+                        if slot_kind == "toolhead" and active_slot is None:
+                            active_slot = printer_slot
+                        elif slot_index == "0-0" and active_slot is None:
                             active_slot = printer_slot
 
                     if active_slot and active_slot.assignment:
@@ -323,6 +332,30 @@ class PluginManager:
             )
             driver.validate_config()
             await driver.start()
+
+            # If supported, sync active spool immediately after startup so
+            # the spool page can render Moonraker state on first load.
+            refresh_status = getattr(driver, "refresh_status", None)
+            if callable(refresh_status):
+                try:
+                    refresh_payload = refresh_status()
+                    if asyncio.iscoroutine(refresh_payload):
+                        refresh_payload = await refresh_payload
+                    if isinstance(refresh_payload, dict):
+                        active_spool_id = refresh_payload.get("active_spool_id")
+                        await self._handle_slots_update(
+                            printer.id,
+                            [],
+                            None,
+                            active_spool_id,
+                        )
+                except Exception as refresh_exc:
+                    logger.debug(
+                        "Initial refresh_status failed for printer %s: %s",
+                        printer.id,
+                        refresh_exc,
+                    )
+
             self.drivers[printer.id] = driver
             self.health_status[printer.id] = driver.health()
             logger.info(f"Started driver {printer.driver_key} for printer {printer.id}")
