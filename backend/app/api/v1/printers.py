@@ -1,4 +1,5 @@
 import logging
+import inspect
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
@@ -7,7 +8,6 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DBSession, PrincipalDep, RequirePermission
 from app.api.v1.schemas import PaginatedResponse
-from app.main import _is_primary
 from app.models import (
     Location,
     Printer,
@@ -24,8 +24,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
 
 
+def _is_primary_worker() -> bool:
+    """Resolve primary worker state lazily to avoid import cycles."""
+    try:
+        from app import main as app_main
+
+        return bool(getattr(app_main, "_is_primary", False))
+    except Exception:
+        return False
+
+
 def _ensure_primary_worker() -> None:
-    if not _is_primary:
+    if not _is_primary_worker():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
@@ -420,15 +430,24 @@ async def driver_action(
 
     # If the caller supplies a spool_id alongside filament_data, enrich filament_data
     # with printer-specific params (e.g. bambuddy_spool_id) before dispatching to the
-    # driver. spool_id is consumed here and NOT forwarded to the driver method.
+    # driver. spool_id is forwarded only when the target method supports it.
     params = dict(data.params)
     spool_id = params.pop("spool_id", None)
-    if spool_id is not None and "filament_data" in params:
+    normalized_spool_id: int | None = None
+    if spool_id is not None:
+        normalized_spool_id = int(spool_id)
+
+    if normalized_spool_id is not None and "filament_data" in params:
         params["filament_data"] = await plugin_manager.enrich_filament_data(
-            spool_id=int(spool_id),
+            spool_id=normalized_spool_id,
             printer_id=printer_id,
             filament_data=params["filament_data"],
         )
+
+    if normalized_spool_id is not None:
+        method_signature = inspect.signature(method)
+        if "spool_id" in method_signature.parameters:
+            params["spool_id"] = normalized_spool_id
 
     try:
         if callable(method):
