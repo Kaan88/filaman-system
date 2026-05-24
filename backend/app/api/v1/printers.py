@@ -1,13 +1,17 @@
 import logging
 import inspect
+import contextlib
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DBSession, PrincipalDep, RequirePermission
 from app.api.v1.schemas import PaginatedResponse
+from app.core.config import settings
 from app.models import (
     Location,
     Printer,
@@ -22,6 +26,10 @@ from app.plugins.manager import plugin_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
+
+_PRIMARY_PROXY_HEADER = "x-filaman-primary-hop"
+_PRIMARY_PROXY_MAX_HOPS = 12
+_PRIMARY_PROXY_RETRIES = 8
 
 
 def _is_primary_worker() -> bool:
@@ -43,6 +51,82 @@ def _ensure_primary_worker() -> None:
                 "message": "Driver control is available on the primary worker only. Please retry.",
             },
         )
+
+
+def _is_primary_required_error(detail: Any) -> bool:
+    return isinstance(detail, dict) and detail.get("code") == "primary_worker_required"
+
+
+def _forward_headers(request: Request, hop: int) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for key in ("authorization", "cookie", "x-csrf-token", "accept"):
+        value = request.headers.get(key)
+        if value:
+            headers[key] = value
+    headers[_PRIMARY_PROXY_HEADER] = str(hop + 1)
+    return headers
+
+
+async def _proxy_to_primary(
+    request: Request,
+    method: str,
+    path: str,
+    json_body: dict[str, Any] | None = None,
+) -> Any:
+    with contextlib.suppress(Exception):
+        hop = int(request.headers.get(_PRIMARY_PROXY_HEADER, "0"))
+    hop = int(request.headers.get(_PRIMARY_PROXY_HEADER, "0")) if request.headers.get(_PRIMARY_PROXY_HEADER, "0").isdigit() else 0
+    if hop >= _PRIMARY_PROXY_MAX_HOPS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "primary_proxy_failed",
+                "message": "Could not route request to primary worker",
+            },
+        )
+
+    url = f"http://127.0.0.1:{settings.port}{path}"
+    headers = _forward_headers(request, hop)
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for _ in range(_PRIMARY_PROXY_RETRIES):
+            response = await client.request(
+                method,
+                url,
+                params=request.query_params,
+                headers=headers,
+                json=json_body,
+            )
+
+            payload: Any = None
+            with contextlib.suppress(Exception):
+                payload = response.json()
+
+            if response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                detail = payload.get("detail") if isinstance(payload, dict) else None
+                if _is_primary_required_error(detail):
+                    continue
+
+            if response.status_code >= 400:
+                if isinstance(payload, dict) and "detail" in payload:
+                    raise HTTPException(status_code=response.status_code, detail=payload["detail"])
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail={
+                        "code": "proxy_failed",
+                        "message": response.text,
+                    },
+                )
+
+            return payload
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "primary_proxy_failed",
+            "message": "Could not route request to primary worker",
+        },
+    )
 
 
 class PrinterCreate(BaseModel):
@@ -392,9 +476,19 @@ class DriverActionResponse(BaseModel):
 async def driver_action(
     printer_id: int,
     data: DriverActionRequest,
+    request: Request,
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    if not _is_primary_worker():
+        payload = await _proxy_to_primary(
+            request,
+            method="POST",
+            path=f"/api/v1/printers/{printer_id}/driver/action",
+            json_body=data.model_dump(),
+        )
+        return DriverActionResponse.model_validate(payload)
+
     _ensure_primary_worker()
 
     result = await db.execute(
@@ -495,10 +589,19 @@ async def driver_health(
 
 @router.post("/reconnect-all")
 async def reconnect_all_printers(
+    request: Request,
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
     """Force reconnect for all active printers."""
+    if not _is_primary_worker():
+        payload = await _proxy_to_primary(
+            request,
+            method="POST",
+            path="/api/v1/printers/reconnect-all",
+        )
+        return payload
+
     _ensure_primary_worker()
     results = await plugin_manager.reconnect_all()
     return {"results": {str(k): v for k, v in results.items()}}
@@ -526,9 +629,18 @@ async def driver_debug_log(
 @router.post("/{printer_id}/driver/start", response_model=DriverActionResponse)
 async def start_driver(
     printer_id: int,
+    request: Request,
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    if not _is_primary_worker():
+        payload = await _proxy_to_primary(
+            request,
+            method="POST",
+            path=f"/api/v1/printers/{printer_id}/driver/start",
+        )
+        return DriverActionResponse.model_validate(payload)
+
     _ensure_primary_worker()
 
     result = await db.execute(
@@ -563,9 +675,18 @@ async def start_driver(
 @router.post("/{printer_id}/driver/stop", response_model=DriverActionResponse)
 async def stop_driver(
     printer_id: int,
+    request: Request,
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    if not _is_primary_worker():
+        payload = await _proxy_to_primary(
+            request,
+            method="POST",
+            path=f"/api/v1/printers/{printer_id}/driver/stop",
+        )
+        return DriverActionResponse.model_validate(payload)
+
     _ensure_primary_worker()
 
     result = await db.execute(
