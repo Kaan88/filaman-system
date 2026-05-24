@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.deps import DBSession, PrincipalDep, RequirePermission
 from app.api.v1.schemas import PaginatedResponse
+from app.main import _is_primary
 from app.models import (
     Location,
     Printer,
@@ -21,6 +22,17 @@ from app.plugins.manager import plugin_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
+
+
+def _ensure_primary_worker() -> None:
+    if not _is_primary:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "primary_worker_required",
+                "message": "Driver control is available on the primary worker only. Please retry.",
+            },
+        )
 
 
 class PrinterCreate(BaseModel):
@@ -373,6 +385,8 @@ async def driver_action(
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    _ensure_primary_worker()
+
     result = await db.execute(
         select(Printer).where(Printer.id == printer_id, Printer.deleted_at.is_(None))
     )
@@ -466,6 +480,7 @@ async def reconnect_all_printers(
     principal=RequirePermission("printers:update"),
 ):
     """Force reconnect for all active printers."""
+    _ensure_primary_worker()
     results = await plugin_manager.reconnect_all()
     return {"results": {str(k): v for k, v in results.items()}}
 
@@ -495,6 +510,8 @@ async def start_driver(
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    _ensure_primary_worker()
+
     result = await db.execute(
         select(Printer).where(Printer.id == printer_id, Printer.deleted_at.is_(None))
     )
@@ -530,6 +547,8 @@ async def stop_driver(
     db: DBSession,
     principal=RequirePermission("printers:update"),
 ):
+    _ensure_primary_worker()
+
     result = await db.execute(
         select(Printer).where(Printer.id == printer_id, Printer.deleted_at.is_(None))
     )

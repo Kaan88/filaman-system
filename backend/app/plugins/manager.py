@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.cache import response_cache
 from app.core.database import async_session_maker
+from app.core.shared_health import shared_health_store
 from app.models import Printer
 from app.models.plugin import InstalledPlugin
 from app.models.filament import Filament
@@ -232,6 +233,17 @@ class PluginManager:
         if printer.id in self.drivers:
             return True
 
+        # In multi-worker setups another worker may already run this driver.
+        # Avoid duplicate starts by honoring shared health state.
+        shared = shared_health_store.read(printer.id)
+        if shared is not None and bool(shared.get("running", False)):
+            self.health_status[printer.id] = shared
+            logger.info(
+                "Skipping local start for printer %s: already running in another worker",
+                printer.id,
+            )
+            return True
+
         driver_class = self.load_driver(printer.driver_key)
         if not driver_class:
             logger.error(f"Driver not found: {printer.driver_key}")
@@ -271,6 +283,7 @@ class PluginManager:
 
     async def stop_printer(self, printer_id: int) -> None:
         driver = self.drivers.pop(printer_id, None)
+        self.health_status.pop(printer_id, None)
         if driver:
             try:
                 await driver.stop()
@@ -410,9 +423,11 @@ class PluginManager:
         return results
 
     def get_health(self) -> dict[int, dict[str, Any]]:
-        for printer_id, driver in self.drivers.items():
-            self.health_status[printer_id] = driver.health()
-        return self.health_status
+        self.health_status = {
+            printer_id: driver.health()
+            for printer_id, driver in self.drivers.items()
+        }
+        return dict(self.health_status)
 
     # -- Plugin Extra-Field Management ----------------------------------------
 

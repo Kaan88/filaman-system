@@ -112,8 +112,42 @@ async def _watchdog_health_check() -> None:
         )
         disabled_drivers = {r for r in disabled_result.scalars().all()}
 
-    # 1. Restart drivers that report running=False
+        active_result = await db.execute(
+            select(Printer.id, Printer.driver_key).where(
+                Printer.is_active == True,
+                Printer.deleted_at.is_(None),
+            )
+        )
+        active_rows = active_result.all()
+
+    active_printer_ids = {row.id for row in active_rows}
+
+    # 1. Stop local drivers that should not be running anymore.
     for printer_id, status in list(health.items()):
+        current_driver_key = status.get("driver_key")
+        if (
+            printer_id not in active_printer_ids
+            or current_driver_key in disabled_drivers
+        ):
+            logger.info(
+                "Watchdog: stopping stale driver for printer %s (active=%s, disabled=%s)",
+                printer_id,
+                printer_id in active_printer_ids,
+                current_driver_key in disabled_drivers,
+            )
+            await plugin_manager.stop_printer(printer_id)
+
+    # Refresh local health after stale-driver cleanup.
+    health = plugin_manager.get_health()
+
+    # 2. Restart drivers that report running=False
+    for printer_id, status in list(health.items()):
+        current_driver_key = status.get("driver_key")
+        if (
+            printer_id not in active_printer_ids
+            or current_driver_key in disabled_drivers
+        ):
+            continue
         if not status.get("running", True):
             logger.warning(
                 f"Watchdog: driver for printer {printer_id} not running, restarting"
@@ -143,12 +177,12 @@ async def _watchdog_health_check() -> None:
                         f"Watchdog: failed to restart driver for printer {printer_id}"
                     )
 
-    # 2. Start drivers for active printers that have no driver in memory
+    # 3. Start drivers for active printers that have no local driver.
+    # Also verify plugin state to avoid starting disabled driver plugins.
     async with async_session_maker() as db:
         result = await db.execute(
             select(Printer).where(
-                Printer.is_active == True,
-                Printer.deleted_at.is_(None),
+                Printer.id.in_(active_printer_ids),
             )
         )
         active_printers = result.scalars().all()

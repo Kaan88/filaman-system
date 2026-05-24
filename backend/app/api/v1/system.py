@@ -64,6 +64,7 @@ from app.services.filamentdb_import_service import (
     FilamentDBImportError,
     FilamentDBImportService,
 )
+from app.core.shared_health import shared_health_store
 
 logger = logging.getLogger(__name__)
 
@@ -781,12 +782,25 @@ async def toggle_plugin_active(
     affected = 0
 
     if plugin.driver_key:
+        affected_result = await db.execute(
+            select(Printer.id).where(
+                Printer.driver_key == plugin.driver_key,
+                Printer.deleted_at.is_(None),
+            )
+        )
+        affected_printer_ids = [r.id for r in affected_result.all()]
+
         if not body.is_active:
             # Deaktivierung: alle laufenden Treiber dieses Plugins stoppen
             for pid, drv in list(plugin_manager.drivers.items()):
                 if getattr(drv, "driver_key", None) == plugin.driver_key:
                     await plugin_manager.stop_printer(pid)
                     affected += 1
+
+            # Clear shared health entries immediately so secondaries don't report
+            # stale running/connected states.
+            for pid in affected_printer_ids:
+                shared_health_store.clear(pid)
         else:
             # Aktivierung: aktive Drucker dieses Plugins starten
             result = await db.execute(
