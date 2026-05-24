@@ -1645,6 +1645,9 @@ const { id } = Astro.params
           await loadPrinterSlotOverview()
         }
         // If pending but wrong printer_id → ignore, let polling handle it
+      } else if (data.event === 'printer_update' && !pendingSlotAssign) {
+        // Slot assignments or active spool state may have changed.
+        await loadPrinterSlotOverview()
       }
     })
 
