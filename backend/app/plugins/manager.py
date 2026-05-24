@@ -216,13 +216,50 @@ class PluginManager:
                             active_slot = printer_slot
                         elif slot_index == "0-0" and active_slot is None:
                             active_slot = printer_slot
+                    await db.commit()
+                    logger.info(
+                        f"Updated {len(slots_data)} slots for printer {printer_id}"
+                    )
+                    # Broadcast to SSE clients
+                    await event_bus.publish(
+                        {"event": "slots_update", "printer_id": printer_id}
+                    )
 
-                    if active_slot and active_slot.assignment:
-                        active_slot.assignment.spool_id = active_spool_id
-                        active_slot.assignment.updated_at = datetime.now(timezone.utc)
-                        active_meta = dict(active_slot.assignment.meta or {})
+                active_spool_synced = False
+                if active_spool_id_raw is not None:
+                    slot_result = await db.execute(
+                        select(PrinterSlot)
+                        .options(selectinload(PrinterSlot.assignment))
+                        .where(PrinterSlot.printer_id == printer_id)
+                        .order_by(PrinterSlot.slot_no)
+                    )
+                    printer_slots = slot_result.scalars().all()
+
+                    active_slot: PrinterSlot | None = None
+                    for slot in printer_slots:
+                        slot_index = (slot.custom_fields or {}).get("slot_index")
+                        if slot_index == "0-0":
+                            active_slot = slot
+                            break
+                    if active_slot is None and printer_slots:
+                        active_slot = printer_slots[0]
+
+                    if active_slot is not None:
+                        assignment = active_slot.assignment
+                        if assignment is None:
+                            assignment = PrinterSlotAssignment(
+                                slot_id=active_slot.id,
+                                present=active_spool_id is not None,
+                                meta={},
+                            )
+                            db.add(assignment)
+                            await db.flush()
+
+                        assignment.spool_id = active_spool_id
+                        assignment.present = active_spool_id is not None
+                        assignment.updated_at = datetime.now(timezone.utc)
+                        active_meta = dict(assignment.meta or {})
                         active_meta["active_spool_id"] = active_spool_id
-                        active_slot.assignment.meta = active_meta
 
                         if active_spool_id is not None:
                             spool_res = await db.execute(
@@ -240,8 +277,7 @@ class PluginManager:
                             active_spool = spool_res.scalar_one_or_none()
 
                             if active_spool is not None:
-                                active_slot.assignment.spool = active_spool
-                                active_slot.assignment.present = True
+                                assignment.spool = active_spool
 
                                 filament = active_spool.filament
                                 if filament is not None:
@@ -254,16 +290,20 @@ class PluginManager:
                                             active_meta["tray_color"] = (
                                                 first_color.hex_code.replace("#", "")[:6]
                                             )
+                        else:
+                            active_meta.pop("tray_type", None)
+                            active_meta.pop("tray_color", None)
 
-                                active_slot.assignment.meta = active_meta
+                        assignment.meta = active_meta
+                        active_spool_synced = True
 
+                if active_spool_synced:
                     await db.commit()
-                    logger.info(
-                        f"Updated {len(slots_data)} slots for printer {printer_id}"
-                    )
-                    # Broadcast to SSE clients
                     await event_bus.publish(
                         {"event": "slots_update", "printer_id": printer_id}
+                    )
+                    await event_bus.publish(
+                        {"event": "printer_update", "printer_id": printer_id}
                     )
 
                 # Persist AMS/slot summary to Printer.custom_fields
