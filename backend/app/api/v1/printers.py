@@ -83,10 +83,7 @@ async def _proxy_to_primary(
             },
         )
 
-    target = request.url.replace(
-        path=path,
-        query=request.url.query,
-    )
+    target = request.url.replace(path=path, query="")
     # Route through same service endpoint and rely on retry loop to
     # eventually hit the primary worker.
     url = str(target)
@@ -573,10 +570,20 @@ async def driver_action(
 @router.get("/{printer_id}/driver/health")
 async def driver_health(
     printer_id: int,
+    request: Request,
     db: DBSession,
     principal: PrincipalDep,
     refresh: int | None = Query(None),
 ):
+    if refresh and not _is_primary_worker():
+        payload = await _proxy_to_primary(
+            request,
+            method="GET",
+            path=f"/api/v1/printers/{printer_id}/driver/health",
+        )
+        if isinstance(payload, dict):
+            return payload
+
     driver = plugin_manager.drivers.get(printer_id)
     if driver:
         if refresh:

@@ -1649,6 +1649,7 @@ const { id } = Astro.params
 
     // --- SSE Auto-Update (via shared Layout.astro connection) ---
     let pendingOverviewReload: number | null = null
+    let overviewIntervalId: number | null = null
     function queueOverviewReload() {
       if (pendingOverviewReload != null) return
       pendingOverviewReload = window.setTimeout(async () => {
@@ -1671,6 +1672,19 @@ const { id } = Astro.params
       } else if (data.event === 'printer_update' && !pendingSlotAssign) {
         // Slot assignments or active spool state may have changed.
         queueOverviewReload()
+      }
+    })
+
+    // Multi-worker fallback: ensure slot/active-spool view stays fresh even
+    // if SSE events are handled by another worker process.
+    overviewIntervalId = window.setInterval(() => {
+      if (!pendingSlotAssign) queueOverviewReload()
+    }, 15000)
+
+    window.addEventListener('pagehide', () => {
+      if (overviewIntervalId != null) {
+        window.clearInterval(overviewIntervalId)
+        overviewIntervalId = null
       }
     })
 
