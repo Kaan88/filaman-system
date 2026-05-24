@@ -579,9 +579,6 @@ async def stop_driver(
             detail={"code": "not_found", "message": "Printer not found"},
         )
 
-    if printer_id not in plugin_manager.drivers:
-        return DriverActionResponse(success=True, message="Driver not running")
-
     await plugin_manager.stop_printer(printer_id)
 
     # Clear shared health so secondaries immediately see running=False

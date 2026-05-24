@@ -233,17 +233,6 @@ class PluginManager:
         if printer.id in self.drivers:
             return True
 
-        # In multi-worker setups another worker may already run this driver.
-        # Avoid duplicate starts by honoring shared health state.
-        shared = shared_health_store.read(printer.id)
-        if shared is not None and bool(shared.get("running", False)):
-            self.health_status[printer.id] = shared
-            logger.info(
-                "Skipping local start for printer %s: already running in another worker",
-                printer.id,
-            )
-            return True
-
         driver_class = self.load_driver(printer.driver_key)
         if not driver_class:
             logger.error(f"Driver not found: {printer.driver_key}")

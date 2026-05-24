@@ -1406,9 +1406,9 @@ const { id } = Astro.params
 
     // -- Slot actions --------------------------------------------------------
 
-    function getSlotDot(slotIndex: string): HTMLElement | null {
+    function getSlotDot(slotIndex: string, printerId: number): HTMLElement | null {
       const container = document.getElementById('printer-slots-inline')
-      return container?.querySelector(`.slot-dot[data-slot*='"slot_index":"${slotIndex}"']`) || null
+      return container?.querySelector(`.slot-dot[data-printer-id="${printerId}"][data-slot*='"slot_index":"${slotIndex}"']`) || null
     }
 
     function clearSlotRingState(dotEl: HTMLElement) {
@@ -1423,9 +1423,9 @@ const { id } = Astro.params
 
     function resolveSlotAssign(status: 'success' | 'error') {
       if (!pendingSlotAssign) return
-      const { slotIndex } = pendingSlotAssign
+      const { slotIndex, printerId } = pendingSlotAssign
       clearPendingSlotAssign()
-      const dot = getSlotDot(slotIndex)
+      const dot = getSlotDot(slotIndex, printerId)
       if (!dot) { loadPrinterSlotOverview(); return }
       clearSlotRingState(dot)
       if (status === 'success') {
@@ -1446,7 +1446,13 @@ const { id } = Astro.params
       const maxAttempts = 5
 
       async function poll() {
-        if (!pendingSlotAssign || pendingSlotAssign.slotIndex !== slotIndex) return
+        if (
+          !pendingSlotAssign ||
+          pendingSlotAssign.slotIndex !== slotIndex ||
+          pendingSlotAssign.printerId !== printerId
+        ) {
+          return
+        }
         attempts++
         try {
           const res = await fetch(`/api/v1/printers/${printerId}/driver/health`, { credentials: 'include', signal: getAbortSignal() })
@@ -1490,7 +1496,7 @@ const { id } = Astro.params
       clearPendingSlotAssign()
 
       // Immediately show white pulsing ring
-      const dotEl = getSlotDot(slotIndex)
+      const dotEl = getSlotDot(slotIndex, printerId)
       if (dotEl) {
         clearSlotRingState(dotEl)
         dotEl.classList.add('slot-sending')
