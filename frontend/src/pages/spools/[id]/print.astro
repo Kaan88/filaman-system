@@ -13,6 +13,7 @@ const { id } = Astro.params
 <Layout title="FilaMan - Print Label">
   <div class="print-page">
     <aside class="print-sidebar">
+      <div class="print-sidebar-scroll">
       <a id="btn-back" class="sidebar-header back-link">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
         <span id="label-back">Zurück zur Spule</span>
@@ -475,6 +476,8 @@ const { id } = Astro.params
 
       </div>
 
+      </div><!-- /.print-sidebar-scroll -->
+
       <div class="action-buttons">
         <button id="btn-print" class="fm-btn fm-btn-primary" onclick="filamanPrint()">Drucken</button>
         <button id="btn-reset" class="fm-btn fm-btn-outline">Zurücksetzen</button>
@@ -529,19 +532,31 @@ const { id } = Astro.params
     display: flex;
     height: calc(100vh - 64px);
     margin: -32px;
-    overflow: hidden;
+    overflow-x: auto;   /* allow h-scroll on narrow screens */
+    overflow-y: hidden;
   }
 
   .print-sidebar {
     width: 320px;
+    flex-shrink: 0;  /* don't compress on narrow viewport */
     transition: width 0.2s ease;
     background: var(--bg-elevated);
     border-right: 1px solid var(--border);
-    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Scrollable inner wrapper — action buttons sit outside so they're always visible */
+  .print-sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: visible;  /* allow native select dropdown to render fully */
     display: flex;
     flex-direction: column;
     gap: 20px;
-    overflow-y: auto;
+    padding: 24px 24px 16px;
   }
 
   .sidebar-header {
@@ -582,6 +597,7 @@ const { id } = Astro.params
 
   .preview-container {
     flex: 1;
+    min-width: 320px;  /* minimum usable preview width (width of zoom bar) */
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -641,8 +657,10 @@ const { id } = Astro.params
   .preview-scroll-area {
     flex: 1;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    /* 'safe center' falls back to flex-start when content overflows, so the
+       label is always reachable by scrolling rather than hidden above/left */
+    align-items: safe center;
+    justify-content: safe center;
     padding: 40px;
     overflow: auto;
   }
@@ -879,11 +897,12 @@ const { id } = Astro.params
   }
 
   .action-buttons {
-    margin-top: auto;
+    /* Outside the scroll wrapper so Print/Defaults are always visible */
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding-top: 20px;
+    padding: 16px 24px 24px;
     border-top: 1px solid var(--border);
   }
 
@@ -1478,6 +1497,9 @@ const { id } = Astro.params
     padding: 14px 16px 12px;
     width: min(760px, calc(100vw - 24px));
     max-width: calc(100vw - 24px);
+    /* cap height so it never goes off-screen on small displays */
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0,0,0,0.3);
     font-size: 0.78rem;
     line-height: 1.6;
@@ -1738,6 +1760,22 @@ const { id } = Astro.params
 <script>
   import { getReadableTextColor, normalizeHexColor, parseTemplate, renderTemplateText } from '../../../lib/label-template'
   import type { SpoolData } from '../../../lib/label-template'
+
+  // Auto-collapse nav sidebar on the print page when the viewport is narrow —
+  // the print page needs maximum horizontal space and the overlay would cover the controls.
+  function applyPrintSidebarCollapse() {
+    const page = document.getElementById('fm-page')
+    if (!page) return
+    if (window.innerWidth < 1100) {
+      document.documentElement.classList.add('sidebar-collapsed')
+      page.classList.add('collapsed')
+      if (window.innerWidth > 768) {
+        localStorage.setItem('sidebar-collapsed', 'true')
+      }
+    }
+  }
+  applyPrintSidebarCollapse()
+  window.addEventListener('resize', applyPrintSidebarCollapse, { passive: true })
 
   // Global print function for Safari compatibility
   ;(window as any).filamanPrint = function() {
