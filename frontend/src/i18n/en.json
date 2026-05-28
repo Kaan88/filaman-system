@@ -506,7 +506,7 @@
     "dsRight": "Right",
     "dsTop": "Top",
     "dsMid": "Mid",
-    "dsBot": "Bot"
+    "dsBot": "Bot",
     "importFromTag": "Import from Tag",
     "importFromTagTitle": "Import Data from NFC Tag",
     "importFromTagSelectDevice": "Select a device",

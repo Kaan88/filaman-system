@@ -508,7 +508,7 @@
     "dsRight": "Rechts",
     "dsTop": "Oben",
     "dsMid": "Mitte",
-    "dsBot": "Unten"
+    "dsBot": "Unten",
     "importFromTag": "Von Tag übernehmen",
     "importFromTagTitle": "Daten vom NFC-Tag übernehmen",
     "importFromTagSelectDevice": "Gerät auswählen",
