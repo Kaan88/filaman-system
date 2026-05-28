@@ -11,8 +11,88 @@ from app.api.deps import DBSession
 logger = logging.getLogger(__name__)
 from app.api.v1.schemas_device import HeartbeatRequest, LocateRequest, LocateResponse, WeighRequest, WeighResponse, WriteTagRequest, WriteTagResponse, RfidResultRequest, RfidResultResponse, WriteStatusResponse
 from app.core.security import Principal, generate_token_secret, hash_token
-from app.models import Device, Location, Spool, SpoolStatus
+from app.models import AppSettings, Device, Location, Spool, SpoolStatus
+from app.models.filament import Color, FilamentColor, Manufacturer
 from app.services.spool_service import SpoolService
+
+_MATERIAL_TEMP_DEFAULTS: dict[str, tuple[int, int]] = {
+    "PLA": (180, 230),
+    "PETG": (220, 250),
+    "ABS": (230, 270),
+    "ASA": (240, 270),
+    "TPU": (220, 250),
+    "TPE": (220, 250),
+    "NYLON": (240, 280),
+    "PA": (240, 280),
+    "PC": (260, 300),
+    "HIPS": (220, 250),
+    "PVA": (170, 200),
+    "PLA+": (180, 230),
+}
+_DEFAULT_TEMP = (190, 230)
+
+
+async def _build_extended_data(db: DBSession, spool: Spool, protocol: str) -> dict:
+    """Baut das Extended-Data-Dict für RFID-Tags aus den Spulen-/Filamentdaten."""
+    filament = spool.filament
+    material_type = filament.material_type if filament else "PLA"
+
+    # Farbe (erste Farbe des Filaments)
+    color_hex = "FFFFFF"
+    if filament:
+        fc_result = await db.execute(
+            select(Color.hex_code)
+            .join(FilamentColor, FilamentColor.color_id == Color.id)
+            .where(FilamentColor.filament_id == filament.id)
+            .order_by(FilamentColor.position)
+            .limit(1)
+        )
+        raw_hex = fc_result.scalar_one_or_none()
+        if raw_hex:
+            color_hex = raw_hex.replace("#", "")[:6].upper()
+
+    # Hersteller
+    brand = "Generic"
+    if filament and filament.manufacturer_id:
+        mfr_result = await db.execute(
+            select(Manufacturer.name).where(Manufacturer.id == filament.manufacturer_id)
+        )
+        mfr_name = mfr_result.scalar_one_or_none()
+        if mfr_name:
+            brand = mfr_name
+
+    # Temperaturen: aus SpoolPrinterParam / FilamentPrinterParam (bambu_nozzle_temp_min/max)
+    min_temp, max_temp = _MATERIAL_TEMP_DEFAULTS.get(material_type.upper(), _DEFAULT_TEMP)
+    if filament:
+        from app.models.printer_params import FilamentPrinterParam
+        param_result = await db.execute(
+            select(FilamentPrinterParam.param_key, FilamentPrinterParam.param_value)
+            .where(
+                FilamentPrinterParam.filament_id == filament.id,
+                FilamentPrinterParam.param_key.in_(["bambu_nozzle_temp_min", "bambu_nozzle_temp_max"]),
+            )
+        )
+        params = {row.param_key: row.param_value for row in param_result.all()}
+        if "bambu_nozzle_temp_min" in params and params["bambu_nozzle_temp_min"]:
+            try:
+                min_temp = int(params["bambu_nozzle_temp_min"])
+            except ValueError:
+                pass
+        if "bambu_nozzle_temp_max" in params and params["bambu_nozzle_temp_max"]:
+            try:
+                max_temp = int(params["bambu_nozzle_temp_max"])
+            except ValueError:
+                pass
+
+    return {
+        "protocol": protocol,
+        "version": "1.0",
+        "type": material_type,
+        "color_hex": color_hex,
+        "brand": brand,
+        "min_temp": str(min_temp),
+        "max_temp": str(max_temp),
+    }
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -158,6 +238,20 @@ async def write_rfid_tag(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "bad_request", "message": "Either spool_id or location_id must be provided"},
         )
+
+    # Extended Data: nur wenn Spool und Setting aktiv
+    if data.spool_id:
+        settings_result = await db.execute(select(AppSettings).where(AppSettings.id == 1))
+        app_settings = settings_result.scalar_one_or_none()
+        if app_settings and app_settings.rfid_extended_data_enabled:
+            spool_result = await db.execute(
+                select(Spool).where(Spool.id == data.spool_id)
+            )
+            spool_obj = spool_result.scalar_one_or_none()
+            if spool_obj:
+                payload.update(await _build_extended_data(
+                    db, spool_obj, app_settings.rfid_protocol
+                ))
 
     # Log the attempt
     logger.info(f"Triggering RFID write on device {device_id} at {device_url}")

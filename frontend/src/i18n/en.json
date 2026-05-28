@@ -836,7 +836,14 @@
     "appSettingsLoadFailed": "Failed to load settings.",
     "appSettingsCurrency": "Currency",
     "appSettingsCurrencyLabel": "Display Currency",
-    "appSettingsCurrencyDescription": "The currency used to display prices throughout the application"
+    "appSettingsCurrencyDescription": "The currency used to display prices throughout the application",
+    "rfidSettingsTitle": "RFID Tag Extended Data",
+    "rfidExtendedDataEnabled": "Write extended data",
+    "rfidExtendedDataEnabledHint": "When enabled, additional filament data (material, color, temperatures etc.) will be written to the RFID tag.",
+    "rfidProtocol": "Protocol",
+    "rfidProtocolHint": "Select the protocol for the extended tag data.",
+    "rfidProtocolOpenspool": "OpenSpool",
+    "rfidProtocolFilaman": "FilaMan"
   },
   "changelog": {
     "title": "Changelog",
