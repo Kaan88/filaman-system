@@ -16,8 +16,7 @@ const filamentId = Astro.url.searchParams.get('filament_id')
       type="button"
       id="btn-import-from-tag"
       class="fm-btn"
-      disabled
-      style="width: 100%; margin-bottom: 20px; background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; opacity: 0.45; cursor: not-allowed;"
+      style="width: 100%; margin-bottom: 20px; background: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd; opacity: 0.45;"
       data-i18n="spools.importFromTag"
     >
       Von Tag übernehmen
@@ -730,10 +729,18 @@ const filamentId = Astro.url.searchParams.get('filament_id')
       try {
         const res = await fetch('/api/v1/devices/active', { credentials: 'include' })
         const devices: any[] = await res.json()
-        if (devices && devices.length > 0 && btnImportFromTag) {
-          btnImportFromTag.disabled = false
-          btnImportFromTag.style.opacity = '1'
-          btnImportFromTag.style.cursor = 'pointer'
+        if (btnImportFromTag) {
+          if (devices && devices.length > 0) {
+            importHasActiveDevice = true
+            btnImportFromTag.style.opacity = '1'
+            btnImportFromTag.style.cursor = 'pointer'
+            btnImportFromTag.title = ''
+          } else {
+            importHasActiveDevice = false
+            btnImportFromTag.style.opacity = '0.45'
+            btnImportFromTag.style.cursor = 'not-allowed'
+            btnImportFromTag.title = t('spools.importFromTagNoDevices')
+          }
         }
       } catch { /* ignore */ }
     }
@@ -924,8 +931,10 @@ const filamentId = Astro.url.searchParams.get('filament_id')
 
     let importPollInterval: ReturnType<typeof setInterval> | null = null
     let importSelectedDeviceId: number | null = null
+    let importHasActiveDevice = false
 
     function openImportTagModal() {
+      if (!importHasActiveDevice) return
       importTagModal.style.display = ''
       loadDevicesForImport()
     }
