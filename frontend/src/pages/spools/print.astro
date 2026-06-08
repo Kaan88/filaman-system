@@ -1,5 +1,6 @@
 ---
 import Layout from '../../layouts/Layout.astro'
+import LabelDesignerEditor from '../../components/LabelDesignerEditor.astro'
 ---
 
 <Layout title="FilaMan - Label Print">
@@ -26,7 +27,40 @@ import Layout from '../../layouts/Layout.astro'
     .fm-input { background: var(--input-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; color: var(--text); font-size: 0.9rem; width: 100%; height: 42px; box-sizing: border-box; }
     .preview-container { flex: 1; overflow-y: auto; padding: 40px; background: var(--bg-soft); display: flex; flex-direction: column; align-items: center; gap: 24px; }
     .label-count { font-size: 0.85rem; color: var(--text-muted); }
+    .preview-zoom-bar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      backdrop-filter: blur(10px);
+    }
+    .preview-zoom-btn {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--input-bg);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .preview-zoom-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .preview-zoom-slider { width: 150px; accent-color: var(--accent); }
+    .preview-zoom-label { min-width: 44px; text-align: right; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; }
     .checkbox-grid-single { grid-template-columns: 1fr; }
+    .tab-nav { display: flex; gap: 4px; background: var(--bg-soft); border-radius: var(--radius-sm); padding: 4px; }
+    .tab-btn { flex: 1; padding: 7px 10px; border: none; border-radius: calc(var(--radius-sm) - 2px); background: transparent; color: var(--text-muted); font-family: var(--font-sans); font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: background var(--transition), color var(--transition); white-space: nowrap; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { background: var(--bg-elevated); color: var(--accent); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
   </style>
 
   <!-- Label CSS must be global so dynamically inserted elements receive styles -->
@@ -39,6 +73,14 @@ import Layout from '../../layouts/Layout.astro'
       border-radius: 4px; color: black !important;
       font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
     }
+    .label-preview::before {
+      content: '';
+      position: absolute;
+      inset: var(--inner-border-inset, 0mm);
+      border: var(--inner-border-style, none);
+      box-sizing: border-box;
+      pointer-events: none;
+    }
     .label-top { display: flex; align-items: center; justify-content: center; gap: 1mm; padding-bottom: 0.3mm; min-height: 0; }
     .label-logo { max-height: 5mm; max-width: 55%; object-fit: contain; display: block; }
     .label-mfr-text { font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: black !important; }
@@ -46,9 +88,9 @@ import Layout from '../../layouts/Layout.astro'
     .label-middle { display: flex; align-items: flex-start; justify-content: space-between; gap: 2mm; flex: 1; min-height: 0; }
     .label-middle-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.5mm; }
     .label-designation { font-weight: 700; overflow: hidden; word-break: break-word; color: black !important; line-height: 1.1; }
-    .label-color-row { display: flex; align-items: center; gap: 1.5mm; }
-    .label-color-swatch { width: 100%; height: 3mm; border-radius: 0.5mm; flex-shrink: 0; }
-    .label-color-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: black !important; }
+    .label-color-row { display: flex; align-items: center; gap: 1.5mm; max-width: 100%; }
+    .label-color-swatch { width: 10mm; max-width: 45%; min-width: 6mm; height: 3mm; border-radius: 0.5mm; flex: 0 0 auto; }
+    .label-color-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: black !important; }
     .label-hex-code { font-family: 'Space Mono', 'Courier New', monospace; white-space: nowrap; color: black !important; flex-shrink: 0; align-self: flex-end; }
     .label-bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: 2mm; margin-top: auto; }
     .label-bottom-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.3mm; }
@@ -66,7 +108,7 @@ import Layout from '../../layouts/Layout.astro'
       .fm-sidebar, #fm-confirm-overlay, .fm-sidebar-backdrop { display: none !important; }
       .fm-page { display: block !important; background: white !important; }
       .fm-page > main { padding: 0 !important; margin: 0 !important; background: white !important; }
-      .print-sidebar, .label-count { display: none !important; }
+      .print-sidebar, .label-count, .preview-zoom-bar { display: none !important; }
       .print-page { margin: 0 !important; height: auto !important; display: block !important; }
       .preview-container { padding: 0 !important; margin: 0 !important; display: block !important; background: white !important; gap: 0 !important; align-items: stretch !important; }
       .label-wrapper { break-after: page !important; page-break-after: always !important; display: flex !important; justify-content: center !important; }
@@ -84,6 +126,7 @@ import Layout from '../../layouts/Layout.astro'
       .label-preview * { color: black !important; }
       .label-color-swatch { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
       .label-qr img, .label-logo { display: block !important; }
+      .label-preview::before { display: block !important; }
     }
   </style>
 
@@ -94,7 +137,12 @@ import Layout from '../../layouts/Layout.astro'
         <span id="btn-back-label" data-i18n="labelPrint.backToOverview">Back to Overview</span>
       </a>
 
-      <div class="settings-section">
+      <div class="tab-nav">
+        <button class="tab-btn active" id="tab-btn-print" data-tab="print" data-i18n="spools.printSettings">Print Settings</button>
+        <button class="tab-btn" id="tab-btn-designer" data-tab="designer" data-i18n="spools.labelDesigner">Label Designer</button>
+      </div>
+
+      <div id="tab-panel-print" class="settings-section">
         <h3 data-i18n="labelPrint.settingsTitle">Label Settings</h3>
         <div><label class="fm-label" data-i18n="labelPrint.widthMm">Width (mm)</label><input type="number" id="input-width" value="60" class="fm-input"></div>
         <div><label class="fm-label" data-i18n="labelPrint.heightMm">Height (mm)</label><input type="number" id="input-height" value="40" class="fm-input"></div>
@@ -108,6 +156,8 @@ import Layout from '../../layouts/Layout.astro'
           <label class="fm-checkbox-group"><input type="checkbox" id="check-id" checked><span data-i18n="labelPrint.checkId">Spool ID</span></label>
           <label class="fm-checkbox-group"><input type="checkbox" id="check-mfr" checked><span data-i18n="labelPrint.checkMfr">Manufacturer</span></label>
           <label class="fm-checkbox-group"><input type="checkbox" id="check-mat" checked><span data-i18n="labelPrint.checkMat">Material</span></label>
+          <label class="fm-checkbox-group"><input type="checkbox" id="check-color" checked><span data-i18n="labelPrint.checkColor">Color</span></label>
+          <label class="fm-checkbox-group"><input type="checkbox" id="check-color-swatch" checked><span data-i18n="labelPrint.checkColorSwatch">Color Swatch</span></label>
         </div>
 
         <h3 id="ef-section-title" data-i18n="labelPrint.extraFieldsTitle" style="display:none;">Extra Fields</h3>
@@ -124,6 +174,8 @@ import Layout from '../../layouts/Layout.astro'
         </div>
       </div>
 
+      <LabelDesignerEditor />
+
       <div class="action-buttons">
         <button class="fm-btn fm-btn-primary" onclick="filamanPrint()" data-i18n="labelPrint.btnPrint">Print</button>
         <button id="btn-export-png" class="fm-btn fm-btn-outline" onclick="filamanExportPNG()" data-i18n="labelPrint.btnExportPng">Export PNG</button>
@@ -133,12 +185,39 @@ import Layout from '../../layouts/Layout.astro'
     </aside>
 
     <main class="preview-container" id="preview-container">
+      <div class="preview-zoom-bar">
+        <button class="preview-zoom-btn" id="preview-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+        <input type="range" id="preview-zoom-slider" min="25" max="300" step="5" value="100" class="preview-zoom-slider">
+        <button class="preview-zoom-btn" id="preview-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+        <span id="preview-zoom-label" class="preview-zoom-label">100%</span>
+        <button class="preview-zoom-btn" id="preview-zoom-reset" title="Reset zoom" aria-label="Reset zoom">⟳</button>
+      </div>
       <div class="label-count" id="label-count"></div>
     </main>
   </div>
 </Layout>
 
 <script>
+  import { captureLabelElement, downloadDataUrl, saveLabelPagesAsPdf } from '../../lib/label-export'
+  import { initLabelDesignerEditor } from '../../lib/label-designer-editor'
+  import {
+    buildDesignerExtraFieldsFromApiSpool,
+    buildSpoolDataFromApiSpool,
+    clampNumber,
+    getFirstFilamentColor,
+    getDesignerLabelDimensions,
+    getManufacturerIdFromApiSpool,
+    loadDesignerSettingsFromStorage,
+    renderDesignerLabel,
+    type DesignerExtraField,
+  } from '../../lib/label-designer'
+  import {
+    buildStandardLabelDataFromApiSpool,
+    buildStandardLabelHtml,
+    getStandardLabelDimensions,
+    renderStandardLabel,
+    type StandardLabelSettings,
+  } from '../../lib/label-standard'
   import { t, initI18n } from '../../lib/i18n'
 
   ;(window as any).filamanPrint = function() {
@@ -156,11 +235,63 @@ import Layout from '../../layouts/Layout.astro'
   const checkID      = document.getElementById('check-id') as HTMLInputElement
   const checkMfr     = document.getElementById('check-mfr') as HTMLInputElement
   const checkMat     = document.getElementById('check-mat') as HTMLInputElement
+  const checkColor   = document.getElementById('check-color') as HTMLInputElement
+  const checkColorSwatch = document.getElementById('check-color-swatch') as HTMLInputElement
   const efTruncate   = document.getElementById('input-ef-truncate') as HTMLInputElement
   const zoomInput    = document.getElementById('input-zoom') as HTMLInputElement
+  const previewZoomSlider = document.getElementById('preview-zoom-slider') as HTMLInputElement | null
+  const previewZoomLabel = document.getElementById('preview-zoom-label') as HTMLElement | null
+  const tabBtns = document.querySelectorAll<HTMLButtonElement>('.tab-btn')
+  const tabPanelPrint = document.getElementById('tab-panel-print') as HTMLElement
+  const tabPanelDesigner = document.getElementById('tab-panel-designer') as HTMLElement
+  const resetBtn = document.getElementById('btn-reset') as HTMLButtonElement | null
+
+  function readStorageValue(key: string): string | null {
+    try {
+      return localStorage.getItem(key)
+    } catch {
+      return null
+    }
+  }
+
+  function writeStorageValue(key: string, value: string) {
+    try {
+      localStorage.setItem(key, value)
+    } catch {
+      // Print preview still works when storage is blocked.
+    }
+  }
+
+  function removeStorageValue(key: string) {
+    try {
+      localStorage.removeItem(key)
+    } catch {
+      // Ignore blocked storage.
+    }
+  }
 
   let spools: any[] = []
   const logoCache: Record<number, string | null> = {}
+  let activePreviewTab: 'print' | 'designer' = readStorageValue('filaman-label-active-tab') === 'designer' ? 'designer' : 'print'
+  let renderVersion = 0
+
+  function getPreviewZoom() {
+    const value = Number(zoomInput.value)
+    return Number.isFinite(value) ? Math.min(300, Math.max(25, Math.round(value / 5) * 5)) : 100
+  }
+
+  function syncPreviewZoomControls() {
+    const zoom = getPreviewZoom()
+    zoomInput.value = String(zoom)
+    if (previewZoomSlider) previewZoomSlider.value = String(zoom)
+    if (previewZoomLabel) previewZoomLabel.textContent = `${zoom}%`
+  }
+
+  function applyPreviewZoom(nextZoom: number) {
+    zoomInput.value = String(Math.min(300, Math.max(25, Math.round(nextZoom / 5) * 5)))
+    syncPreviewZoomControls()
+    queueRenderAll()
+  }
 
   // Extra field definitions from API: {key, label, target_type}
   let efDefs: {key: string, label: string, target_type: string}[] = []
@@ -179,18 +310,19 @@ import Layout from '../../layouts/Layout.astro'
   function saveSettings() {
     const efState: Record<string, boolean> = {}
     Object.entries(efCheckMap).forEach(([k, cb]) => { efState[k] = cb.checked })
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+    writeStorageValue(SETTINGS_KEY, JSON.stringify({
       width: widthInput.value, height: heightInput.value,
       fontSize: fontInput.value, qrSize: qrSizeInput.value,
       showLogo: checkLogo.checked, showQR: checkQR.checked, showID: checkID.checked,
       showMfr: checkMfr.checked, showMat: checkMat.checked,
+      showColor: checkColor.checked, showColorSwatch: checkColorSwatch.checked,
       efTruncate: efTruncate.value, zoom: zoomInput.value, extraFields: efState,
     }))
   }
 
   function loadSettings() {
     try {
-      const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null')
+      const s = JSON.parse(readStorageValue(SETTINGS_KEY) || 'null')
       if (!s) return
       if (s.width) widthInput.value = s.width
       if (s.height) heightInput.value = s.height
@@ -201,6 +333,8 @@ import Layout from '../../layouts/Layout.astro'
       if (s.showID !== undefined) checkID.checked = s.showID
       if (s.showMfr !== undefined) checkMfr.checked = s.showMfr
       if (s.showMat !== undefined) checkMat.checked = s.showMat
+      if (s.showColor !== undefined) checkColor.checked = s.showColor
+      if (s.showColorSwatch !== undefined) checkColorSwatch.checked = s.showColorSwatch
       if (s.efTruncate !== undefined) efTruncate.value = s.efTruncate
       if (s.zoom !== undefined) zoomInput.value = s.zoom
       if (s.extraFields) {
@@ -208,6 +342,7 @@ import Layout from '../../layouts/Layout.astro'
           if (efCheckMap[k]) efCheckMap[k].checked = v
         })
       }
+      syncPreviewZoomControls()
     } catch {}
   }
 
@@ -226,6 +361,35 @@ import Layout from '../../layouts/Layout.astro'
       }
     } catch {}
     logoCache[mfrId] = null; return null
+  }
+
+  function getSpoolLogoUrl(spool: any) {
+    const mfrId = getManufacturerIdFromApiSpool(spool)
+    return mfrId ? logoCache[mfrId] ?? null : null
+  }
+
+  function getBatchDesignerExtraFields(): DesignerExtraField[] {
+    const fields = new Map<string, DesignerExtraField>()
+    for (const def of efDefs) {
+      const key = `${def.target_type}.${def.key}`
+      fields.set(key, { key, label: def.label, value: '', source: def.target_type })
+    }
+    for (const spool of spools) {
+      for (const field of buildDesignerExtraFieldsFromApiSpool(spool)) {
+        if (!field?.key || fields.has(field.key)) continue
+        fields.set(field.key, field)
+      }
+    }
+    return Array.from(fields.values())
+  }
+
+  function getBatchFilamentColorHex() {
+    for (const spool of spools) {
+      const firstColor = getFirstFilamentColor(spool?.filament)
+      const hex = firstColor?.color?.hex_code
+      if (hex) return hex
+    }
+    return ''
   }
 
   function getExtraFieldsForSpool(spool: any): {key: string, label: string, value: string}[] {
@@ -249,127 +413,49 @@ import Layout from '../../layouts/Layout.astro'
     return result
   }
 
-  async function renderLabel(container: HTMLElement, spool: any) {
-    const w = widthInput.value, h = heightInput.value
-    const qrSize = qrSizeInput.value, fsBase = parseInt(fontInput.value) / 100
+  function getStandardSettings(): StandardLabelSettings {
+    return {
+      widthMm: clampNumber(Number(widthInput.value), 20, 200, 60),
+      heightMm: clampNumber(Number(heightInput.value), 10, 120, 40),
+      fontScale: clampNumber(parseInt(fontInput.value), 50, 200, 100) / 100,
+      qrSizeMm: clampNumber(Number(qrSizeInput.value), 8, 40, 18),
+      showLogo: checkLogo.checked,
+      showQR: checkQR.checked,
+      showID: checkID.checked,
+      showManufacturer: checkMfr.checked,
+      showMaterial: checkMat.checked,
+      showColor: checkColor.checked,
+      showColorSwatch: checkColorSwatch.checked,
+      zoom: (parseInt(zoomInput.value) || 100) / 100,
+    }
+  }
 
-    const fil = spool.filament || {}, mfr = fil.manufacturer || {}
-    const colors = fil.filament_colors || [], firstColor = colors[0] || {}
-    const hex = (firstColor.color?.hex_code || '').replace('#', '')
-    const colorName = firstColor.display_name_override || fil.manufacturer_color_name || firstColor.color?.name || ''
-    const logoUrl = mfr.id ? await loadLogo(mfr.id) : null
+  async function renderLabel(container: HTMLElement, spool: any, isStale = () => false) {
+    await renderStandardLabel({
+      element: container,
+      data: buildStandardLabelDataFromApiSpool(spool, getExtraFieldsForSpool(spool)),
+      settings: getStandardSettings(),
+      logoUrl: getSpoolLogoUrl(spool),
+      isStale,
+    })
+  }
 
+  async function renderDesignerLabelForSpool(container: HTMLElement, spool: any, isStale = () => false) {
+    const settings = loadDesignerSettingsFromStorage()
     const zoom = parseInt(zoomInput.value) / 100
-    container.style.width = w + 'mm'
-    container.style.height = h + 'mm'
-    // CSS zoom affects layout flow (unlike transform: scale), so siblings space correctly
     container.style.zoom = String(zoom)
-
-    const topArea  = container.querySelector('.label-top') as HTMLElement
-    const topDiv   = container.querySelector('.label-divider') as HTMLElement
-    const logoImg  = container.querySelector('.label-logo') as HTMLImageElement
-    const mfrText  = container.querySelector('.label-mfr-text') as HTMLElement
-
-    if (checkLogo.checked && logoUrl) {
-      logoImg.src = logoUrl; logoImg.style.cssText = `display:block;max-height:${fsBase*5}mm`
-      mfrText.style.display = 'none'; topArea.style.display = 'flex'; topDiv.style.display = 'block'
-    } else if ((checkLogo.checked || checkMfr.checked) && mfr.name) {
-      logoImg.style.display = 'none'
-      mfrText.textContent = mfr.name; mfrText.style.cssText = `display:block;font-size:${fsBase*11}pt`
-      topArea.style.display = 'flex'; topDiv.style.display = 'block'
-    } else {
-      topArea.style.display = 'none'; topDiv.style.display = 'none'
-    }
-
-    const filEl = container.querySelector('.label-designation') as HTMLElement
-    const fullDesig = [fil.designation || '', checkMat.checked ? fil.material_type || '' : ''].filter(Boolean).join(' ')
-    filEl.textContent = fullDesig; filEl.style.cssText = `font-size:${fsBase*12}pt;display:${fullDesig?'block':'none'}`
-
-    // Color row and swatch hidden; hex always shown if available
-    ;(container.querySelector('.label-color-row') as HTMLElement).style.display = 'none'
-    ;(container.querySelector('.label-color-swatch') as HTMLElement).style.display = 'none'
-    ;(container.querySelector('.label-color-name') as HTMLElement).style.display = 'none'
-
-    const hexEl = container.querySelector('.label-hex-code') as HTMLElement
-    const hasHex = !!hex
-    if (hasHex) {
-      hexEl.textContent = '#' + hex.toUpperCase(); hexEl.style.cssText = `display:block;font-size:${fsBase*9}pt`
-    } else { hexEl.style.display = 'none' }
-
-    const idEl = container.querySelector('.label-id-corner') as HTMLElement
-    idEl.style.display = checkID.checked ? 'block' : 'none'
-    if (checkID.checked) { idEl.textContent = '# ' + spool.id; idEl.style.fontSize = (fsBase*7)+'pt' }
-
-    // Extra fields
-    const efContainer = container.querySelector('.label-extra-fields') as HTMLElement
-    efContainer.innerHTML = ''
-    const efValues = getExtraFieldsForSpool(spool)
-    for (const ef of efValues) {
-      const div = document.createElement('div')
-      div.style.cssText = `font-size:${fsBase*7}pt;color:black;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3`
-      const labelSpan = document.createElement('span')
-      labelSpan.style.color = '#555'
-      labelSpan.textContent = `${ef.label}:`
-      div.appendChild(labelSpan)
-      div.appendChild(document.createTextNode(` ${ef.value}`))
-      efContainer.appendChild(div)
-    }
-
-    // QR
-    const qrCont = container.querySelector('.label-qr') as HTMLElement
-    qrCont.style.display = checkQR.checked ? 'block' : 'none'
-    if (checkQR.checked) {
-      if (typeof (window as any).QRCode === 'undefined') {
-        await new Promise<void>((res, rej) => {
-          const s = document.createElement('script'); s.src = '/vendor/qrcode.min.js'
-          s.onload = () => res(); s.onerror = rej; document.head.appendChild(s)
-        })
-      }
-      qrCont.innerHTML = ''
-      const url = window.location.origin + '/spools/' + spool.id
-      // High resolution for crisp output; CSS scales to mm size
-      const qrPx = 400
-      // @ts-ignore
-      new QRCode(qrCont, { text: url, width: qrPx, height: qrPx, colorDark: '#000', colorLight: '#fff', correctLevel: (window as any).QRCode.CorrectLevel.H })
-      qrCont.style.width = qrSize + 'mm'; qrCont.style.height = qrSize + 'mm'
-      const canvas = qrCont.querySelector('canvas') as HTMLCanvasElement | null
-      if (canvas) {
-        const dataUrl = canvas.toDataURL('image/png')
-        qrCont.innerHTML = ''
-        const img = document.createElement('img')
-        img.src = dataUrl; img.style.cssText = 'width:100%;height:100%;display:block'
-        qrCont.appendChild(img)
-      }
-    }
-
-    // Page size (set once; identical for all labels)
-    let styleEl = document.getElementById('page-style')
-    if (!styleEl) { styleEl = document.createElement('style'); styleEl.id = 'page-style'; document.head.appendChild(styleEl) }
-    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
-    styleEl.innerHTML = `
-      ${isSafari ? '' : `@page { size: ${w}mm ${h}mm; margin: 0; }`}
-      @media print { .label-preview { width:${w}mm !important; height:${h}mm !important; min-width:${w}mm !important; min-height:${h}mm !important; max-width:${w}mm !important; max-height:${h}mm !important; } }
-    `
+    await renderDesignerLabel({
+      element: container,
+      settings,
+      data: buildSpoolDataFromApiSpool(spool),
+      logoUrl: getSpoolLogoUrl(spool),
+      isStale,
+    })
   }
 
   function makeLabelHtml(spoolId: number): string {
     return `<div class="label-wrapper" id="wrapper-${spoolId}"><div class="label-preview" id="label-${spoolId}">
-      <div class="label-id-corner"></div>
-      <div class="label-top"><img class="label-logo" alt=""/><div class="label-mfr-text"></div></div>
-      <div class="label-divider"></div>
-      <div class="label-middle">
-        <div class="label-middle-left">
-          <div class="label-designation"></div>
-          <div class="label-color-row"><div class="label-color-swatch"></div><span class="label-color-name"></span></div>
-        </div>
-        <div class="label-hex-code"></div>
-      </div>
-      <div class="label-bottom">
-        <div class="label-bottom-left">
-          <div class="label-extra-fields"></div>
-        </div>
-        <div class="label-qr"></div>
-      </div>
+      ${buildStandardLabelHtml()}
     </div></div>`
   }
 
@@ -382,18 +468,41 @@ import Layout from '../../layouts/Layout.astro'
   }
 
   // Render labels in parallel chunks so the browser stays responsive
-  async function renderAll() {
+  async function renderAll(tab: 'print' | 'designer' = activePreviewTab) {
+    const token = ++renderVersion
+    const isStale = () => token !== renderVersion || activePreviewTab !== tab
     const CHUNK = 6
     for (let i = 0; i < spools.length; i += CHUNK) {
+      if (isStale()) return
       const chunk = spools.slice(i, i + CHUNK)
       await Promise.all(chunk.map(spool => {
         const el = document.getElementById(`label-${spool.id}`)
-        return el ? renderLabel(el, spool) : Promise.resolve()
+        if (!el) return Promise.resolve()
+        return tab === 'designer'
+          ? renderDesignerLabelForSpool(el, spool, isStale)
+          : renderLabel(el, spool, isStale)
       }))
+      if (isStale()) return
       // Yield to browser between chunks
       await new Promise(r => setTimeout(r, 0))
     }
+    if (isStale()) return
     saveSettings()
+  }
+
+  function queueRenderAll() {
+    void renderAll()
+  }
+
+  function activateTab(tab: 'print' | 'designer') {
+    activePreviewTab = tab
+    tabBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab))
+    tabPanelPrint.style.display = tab === 'print' ? '' : 'none'
+    tabPanelDesigner.style.display = tab === 'designer' ? '' : 'none'
+    if (resetBtn) resetBtn.style.display = tab === 'print' ? '' : 'none'
+    document.querySelector<HTMLElement>('.print-sidebar')?.classList.toggle('sidebar-wide', tab === 'designer')
+    writeStorageValue('filaman-label-active-tab', tab)
+    queueRenderAll()
   }
 
   async function loadExtraFieldDefs() {
@@ -431,20 +540,14 @@ import Layout from '../../layouts/Layout.astro'
         row.appendChild(cb); row.appendChild(span)
         container.appendChild(row)
         efCheckMap[efMapKey(def.target_type, def.key)] = cb
-        cb.addEventListener('change', renderAll)
+        cb.addEventListener('change', queueRenderAll)
       }
     } catch {}
   }
 
   // ── Export helpers ────────────────────────────────────────────────────────
 
-  function downloadDataUrl(dataUrl: string, filename: string) {
-    const a = document.createElement('a')
-    a.download = filename; a.href = dataUrl; a.click()
-  }
-
   async function captureLabel(spool: any): Promise<string> {
-    const { toPng } = await import('html-to-image')
     const spoolId = spool?.id
     if (spoolId == null) {
       throw new Error('Cannot capture label: spool is missing an id')
@@ -453,39 +556,7 @@ import Layout from '../../layouts/Layout.astro'
     if (!(el instanceof HTMLElement)) {
       throw new Error(`Cannot capture label: element label-${spoolId} was not found`)
     }
-    const oz = el.style.zoom
-    el.style.zoom = '1'
-    try {
-      if (document.fonts?.ready) {
-        await document.fonts.ready
-      }
-      await new Promise(r => requestAnimationFrame(r))
-      const dataUrl = await toPng(el, {
-        pixelRatio: 4,
-        backgroundColor: '#ffffff',
-        skipFonts: true,
-        filter: (node: Node) => {
-        if (node instanceof Element) {
-          const style = window.getComputedStyle(node)
-          if (style.display === 'none') {
-            return false
-          }
-        }
-        // Skip logo img elements with no explicit/usable src (e.g. hidden placeholder)
-        if (node instanceof HTMLImageElement && node.classList.contains('label-logo')) {
-          const srcAttr = node.getAttribute('src')?.trim() ?? ''
-          if (!srcAttr) {
-            return false
-          }
-          return srcAttr.startsWith('data:') || srcAttr.startsWith('http://') || srcAttr.startsWith('https://') || srcAttr.startsWith('/')
-          }
-          return true
-        },
-      })
-      return dataUrl
-    } finally {
-      el.style.zoom = oz
-    }
+    return captureLabelElement(el, { pixelRatio: 4, resetZoom: true })
   }
 
   ;(window as any).filamanExportPNG = async function() {
@@ -493,6 +564,7 @@ import Layout from '../../layouts/Layout.astro'
     const btn = document.getElementById('btn-export-png') as HTMLButtonElement
     const orig = btn.textContent; btn.disabled = true; btn.textContent = t('labelPrint.exporting')
     try {
+      await renderAll(activePreviewTab)
       if (spools.length === 1) {
         downloadDataUrl(await captureLabel(spools[0]), `label-${spools[0].id}.png`)
       } else {
@@ -518,16 +590,18 @@ import Layout from '../../layouts/Layout.astro'
     const btn = document.getElementById('btn-export-pdf') as HTMLButtonElement
     const orig = btn.textContent; btn.disabled = true; btn.textContent = t('labelPrint.exporting')
     try {
-      const { jsPDF } = await import('jspdf')
-      const w = parseFloat(widthInput.value), h = parseFloat(heightInput.value)
-      const orient = w > h ? 'l' : 'p'
-      const pdf = new jsPDF({ orientation: orient, unit: 'mm', format: [w, h] })
-
-      for (let i = 0; i < spools.length; i++) {
-        if (i > 0) pdf.addPage([w, h], orient)
-        pdf.addImage(await captureLabel(spools[i]), 'PNG', 0, 0, w, h)
+      await renderAll(activePreviewTab)
+      const designerDims = activePreviewTab === 'designer'
+        ? getDesignerLabelDimensions(loadDesignerSettingsFromStorage())
+        : null
+      const standardDims = designerDims ? null : getStandardLabelDimensions(getStandardSettings())
+      const w = designerDims?.widthMm ?? standardDims!.widthMm
+      const h = designerDims?.heightMm ?? standardDims!.heightMm
+      const pages = []
+      for (const spool of spools) {
+        pages.push({ dataUrl: await captureLabel(spool), widthMm: w, heightMm: h })
       }
-      pdf.save(`labels-${new Date().toISOString().slice(0, 10)}.pdf`)
+      await saveLabelPagesAsPdf(pages, `labels-${new Date().toISOString().slice(0, 10)}.pdf`)
     } catch (e) {
       alert(t('labelPrint.pdfExportFailed'))
       console.error(e)
@@ -537,6 +611,35 @@ import Layout from '../../layouts/Layout.astro'
   // ── Init ──────────────────────────────────────────────────────────────────
 
   await initI18n()
+  const zoomOutBtn = document.getElementById('preview-zoom-out') as HTMLButtonElement | null
+  const zoomInBtn = document.getElementById('preview-zoom-in') as HTMLButtonElement | null
+  const zoomResetBtn = document.getElementById('preview-zoom-reset') as HTMLButtonElement | null
+  const setZoomTitle = (button: HTMLButtonElement | null, key: string, fallback: string) => {
+    if (!button) return
+    const label = t(key) || fallback
+    button.title = label
+    button.setAttribute('aria-label', label)
+  }
+  setZoomTitle(zoomOutBtn, 'labelPrint.zoomOut', 'Zoom out')
+  setZoomTitle(zoomInBtn, 'labelPrint.zoomIn', 'Zoom in')
+  setZoomTitle(zoomResetBtn, 'labelPrint.zoomReset', 'Reset zoom')
+  previewZoomSlider?.addEventListener('input', (event) => {
+    applyPreviewZoom(Number((event.target as HTMLInputElement).value))
+  })
+  zoomOutBtn?.addEventListener('click', () => applyPreviewZoom(getPreviewZoom() - 10))
+  zoomInBtn?.addEventListener('click', () => applyPreviewZoom(getPreviewZoom() + 10))
+  zoomResetBtn?.addEventListener('click', () => applyPreviewZoom(100))
+
+  const designerEditor = initLabelDesignerEditor({
+    extraFields: [],
+    getFilamentColorHex: getBatchFilamentColorHex,
+    translate: (key, fallback) => t(key) || fallback,
+    onChange: queueRenderAll,
+  })
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab === 'designer' ? 'designer' : 'print'))
+  })
 
   const urlParams = new URLSearchParams(window.location.search)
   const backId = urlParams.get('back')
@@ -566,26 +669,37 @@ import Layout from '../../layouts/Layout.astro'
       loadExtraFieldDefs(),
     ])
     spools = spoolResults.filter(r => r.status === 'fulfilled').map(r => (r as PromiseFulfilledResult<any>).value)
+    designerEditor.refreshExtraFields(getBatchDesignerExtraFields())
     countEl.textContent = spoolResults.length === spools.length
       ? t('labelPrint.labelsReady', { count: String(spools.length) })
       : `${t('labelPrint.labelsReady', { count: String(spools.length) })} (${spools.length}/${ids.length})`
 
     loadSettings()
+    syncPreviewZoomControls()
     await prefetchLogos()
-    await renderAll()
+    activateTab(activePreviewTab)
   }
 
-  ;[widthInput, heightInput, fontInput, qrSizeInput, zoomInput, checkLogo, checkQR, checkID, checkMfr, checkMat, efTruncate].forEach(el => {
-    el.addEventListener('change', renderAll)
-    if (el.type === 'range' || el.type === 'number') el.addEventListener('input', renderAll)
+  ;[widthInput, heightInput, fontInput, qrSizeInput, zoomInput, checkLogo, checkQR, checkID, checkMfr, checkMat, checkColor, checkColorSwatch, efTruncate].forEach(el => {
+    el.addEventListener('change', () => {
+      if (el === zoomInput) syncPreviewZoomControls()
+      queueRenderAll()
+    })
+    if (el.type === 'range' || el.type === 'number') {
+      el.addEventListener('input', () => {
+        if (el === zoomInput) syncPreviewZoomControls()
+        queueRenderAll()
+      })
+    }
   })
 
   document.getElementById('btn-reset')?.addEventListener('click', () => {
-    localStorage.removeItem(SETTINGS_KEY)
+    removeStorageValue(SETTINGS_KEY)
     widthInput.value = '60'; heightInput.value = '40'; fontInput.value = '100'; qrSizeInput.value = '18'
     efTruncate.value = '0'; zoomInput.value = '100'
-    checkLogo.checked = checkQR.checked = checkID.checked = checkMfr.checked = checkMat.checked = true
+    syncPreviewZoomControls()
+    checkLogo.checked = checkQR.checked = checkID.checked = checkMfr.checked = checkMat.checked = checkColor.checked = checkColorSwatch.checked = true
     Object.values(efCheckMap).forEach(cb => { cb.checked = false })
-    renderAll()
+    queueRenderAll()
   })
 </script>

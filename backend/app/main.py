@@ -575,6 +575,12 @@ if not settings.debug:
                 os.path.join(static_files_path, "spools/detail/edit/index.html")
             )
 
+        @app.get("/spools/print")
+        async def serve_spools_print():
+            return FileResponse(
+                os.path.join(static_files_path, "spools/print/index.html")
+            )
+
         @app.get("/spools/{id}")
         async def serve_spool_detail(id: int):
             return FileResponse(
