@@ -594,7 +594,10 @@
     "paramsSaveFailed": "Failed to save parameters.",
     "paramsCleared": "Parameters cleared.",
     "paramsManagement": "Manage printer-specific filament and spool parameters here.",
-    "inheritedFromFilament": "Inherited from filament"
+    "inheritedFromFilament": "Inherited from filament",
+    "searchProfile": "Search profile…",
+    "noProfileMatches": "No matches",
+    "applyProfileToExisting": "Apply this slicer profile to existing spools of this filament?\n\nOK = update all existing spools\nCancel = only new spools"
   },
   "locations": {
     "title": "Locations",

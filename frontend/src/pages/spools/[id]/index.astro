@@ -185,6 +185,12 @@ const { id } = Astro.params
     let fieldDefinitions: any[] = []
     let filamentPrinterParams: any[] = []
     let spoolSystemFieldMap: Record<string, any> = {}
+
+    // -- Bambu cloud profile picker (Option A) --
+    let currentDriverKey = ''
+    let currentPrinterId = 0
+    let cloudPresets: any[] = []
+    let cloudPresetsByCode: Record<string, any> = {}
     let filamentSystemFieldMap: Record<string, any> = {}
     // Pending slot assignment state (for animated ring feedback)
     let pendingSlotAssign: { slotIndex: string; printerId: number; expectedColor: string } | null = null
@@ -1026,12 +1032,19 @@ const { id } = Astro.params
           if (printerId) {
             const option = select.selectedOptions[0]
             const driverKey = option?.dataset.driver || ''
+            currentDriverKey = driverKey
+            currentPrinterId = parseInt(printerId)
             await loadFieldDefinitions(driverKey)
+            await loadCloudPresets(currentPrinterId, driverKey)
             await loadSpoolPrinterParams(parseInt(printerId))
           } else {
             fieldDefinitions = []
             currentPrinterParams = []
             filamentPrinterParams = []
+            currentDriverKey = ''
+            currentPrinterId = 0
+            cloudPresets = []
+            cloudPresetsByCode = {}
             renderPrinterParams()
           }
         })
@@ -1073,6 +1086,107 @@ const { id } = Astro.params
       }
     }
 
+    async function loadCloudPresets(printerId: number, driverKey: string) {
+      cloudPresets = []
+      cloudPresetsByCode = {}
+      if (driverKey !== 'bambuddy') return
+      try {
+        const res = await fetch(`/api/v1/printers/${printerId}/driver/cloud-presets`, { credentials: 'include', signal: getAbortSignal() })
+        if (!res.ok) return
+        const data = await res.json()
+        cloudPresets = data.presets || []
+        cloudPresetsByCode = {}
+        cloudPresets.forEach((p: any) => { cloudPresetsByCode[p.code] = p })
+      } catch (e) {
+        if (isAbortError(e)) return
+        console.error('Failed to load cloud presets:', e)
+      }
+    }
+
+    function escapeHtml(s: string): string {
+      return (s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+    }
+
+    function presetLabel(code: string): string {
+      if (!code) return ''
+      const p = cloudPresetsByCode[code]
+      return p ? p.displayName : code
+    }
+
+    function renderCloudCombobox(key: string, code: string, placeholderLabel: string, inheritedStyle: string): string {
+      const label = presetLabel(code)
+      const ph = placeholderLabel
+        ? escapeHtml(presetLabel(placeholderLabel))
+        : escapeHtml(t('printers.searchProfile') || 'Search profile…')
+      return `<div class="cloud-combo" data-key="${key}" style="flex: 2; position: relative;${inheritedStyle}">
+        <input type="hidden" class="param-value" data-key="${key}" value="${escapeHtml(code)}" />
+        <input type="text" class="fm-input cloud-combo-search" autocomplete="off" spellcheck="false"
+          placeholder="${ph}" value="${escapeHtml(label)}" style="width: 100%;" />
+        <div class="cloud-combo-list" style="display:none; position:absolute; z-index:50; left:0; right:0; max-height:260px; overflow-y:auto; background:var(--surface, #1e1e1e); border:1px solid var(--border, #444); border-radius:6px; margin-top:2px; box-shadow:0 4px 16px rgba(0,0,0,0.3);"></div>
+      </div>`
+    }
+
+    function wireCloudComboboxes() {
+      document.querySelectorAll('.cloud-combo').forEach((combo: any) => {
+        const hidden = combo.querySelector('.param-value') as HTMLInputElement
+        const search = combo.querySelector('.cloud-combo-search') as HTMLInputElement
+        const list = combo.querySelector('.cloud-combo-list') as HTMLElement
+
+        const renderList = (query: string) => {
+          const q = query.trim().toLowerCase()
+          const matches = (q
+            ? cloudPresets.filter((p: any) => (p.displayName || '').toLowerCase().includes(q))
+            : cloudPresets).slice(0, 200)
+          if (matches.length === 0) {
+            list.innerHTML = `<div style="padding:8px 10px; color:var(--text-muted); font-size:0.85rem;">${escapeHtml(t('printers.noProfileMatches') || 'No matches')}</div>`
+            return
+          }
+          list.innerHTML = matches.map((p: any) => {
+            const sel = p.code === hidden.value ? ' style="background:var(--accent-muted, rgba(59,130,246,0.15));"' : ''
+            return `<div class="cloud-combo-opt" data-code="${escapeHtml(p.code)}"${sel}
+              style="padding:7px 10px; cursor:pointer; font-size:0.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"
+              title="${escapeHtml(p.displayName)}">${escapeHtml(p.displayName)}</div>`
+          }).join('')
+          list.querySelectorAll('.cloud-combo-opt').forEach((opt: any) => {
+            opt.addEventListener('mousedown', (ev: Event) => {
+              ev.preventDefault()
+              const code = opt.dataset.code
+              hidden.value = code
+              search.value = presetLabel(code)
+              list.style.display = 'none'
+              onCloudProfileSelected(code)
+            })
+          })
+        }
+
+        search.addEventListener('focus', () => { renderList(''); list.style.display = 'block' })
+        search.addEventListener('input', () => { renderList(search.value); list.style.display = 'block' })
+        search.addEventListener('blur', () => {
+          setTimeout(() => {
+            list.style.display = 'none'
+            search.value = presetLabel(hidden.value)
+          }, 150)
+        })
+      })
+    }
+
+    // Spool-level select: push immediately to Bambuddy so both systems match.
+    async function onCloudProfileSelected(code: string) {
+      if (!code || currentDriverKey !== 'bambuddy' || !currentPrinterId) return
+      try {
+        await fetch(`/api/v1/printers/${currentPrinterId}/driver/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+          credentials: 'include',
+          signal: getAbortSignal(),
+          body: JSON.stringify({ action: 'set_spool_profile', params: { spool_id: parseInt(id), code } }),
+        })
+        showParamsFeedback(true)
+      } catch (e) {
+        if (!isAbortError(e)) console.error('Failed to set spool profile:', e)
+      }
+    }
+
     function renderPrinterParams() {
       const container = document.getElementById('printer-params-list') as HTMLElement
       const actions = document.getElementById('printer-params-actions') as HTMLElement
@@ -1106,7 +1220,10 @@ const { id } = Astro.params
         let inputHtml = ''
         const inheritedStyle = isInherited ? ' opacity: 0.6; font-style: italic;' : ''
 
-        if (fd.field_type === 'dropdown' && fd.options) {
+        if (fd.key === 'bambu_idx' && currentDriverKey === 'bambuddy' && cloudPresets.length > 0) {
+          // Inherited filament value shown as placeholder; own value populates input.
+          inputHtml = renderCloudCombobox(fd.key, spoolValue, isInherited ? filamentValue : '', inheritedStyle)
+        } else if (fd.field_type === 'dropdown' && fd.options) {
           const opts = fd.options.map((o: any) => {
             const selected = value === o ? ' selected' : ''
             return `<option value="${o}"${selected}>${o}</option>`
@@ -1136,6 +1253,8 @@ const { id } = Astro.params
           ${inputHtml}
         </div>`
       }).join('')
+
+      wireCloudComboboxes()
     }
 
     function showParamsFeedback(success: boolean) {
