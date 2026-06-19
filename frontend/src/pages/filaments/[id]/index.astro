@@ -676,6 +676,29 @@ const { id } = Astro.params
       return p ? p.displayName : code
     }
 
+    // Codes reflected from the printer's AMS (e.g. "SUN20010") are not part of
+    // the selectable cloud-preset catalog, so the picker can't label them.
+    // Ask the driver to resolve the readable name and inject a display-only
+    // entry so presetLabel() shows the name instead of the raw code.
+    async function ensureCodeLabel(printerId: number, code: string): Promise<void> {
+      if (!code || cloudPresetsByCode[code]) return
+      try {
+        const res = await fetch(`/api/v1/printers/${printerId}/driver/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfTokenGlobal() },
+          credentials: 'include',
+          signal: getAbortSignal(),
+          body: JSON.stringify({ action: 'resolve_preset_label', params: { code } }),
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        const name = json && json.data && json.data.name
+        if (name && name !== code) cloudPresetsByCode[code] = { code, displayName: name, name }
+      } catch (e) {
+        if (!isAbortError(e)) console.error('Failed to resolve preset label:', e)
+      }
+    }
+
     // Searchable combobox markup: visible search input shows the profile NAME,
     // a hidden .param-value input carries the CODE (setting_id) for save.
     function renderCloudCombobox(key: string, code: string): string {
@@ -790,6 +813,7 @@ const { id } = Astro.params
           const pr = await fetch(`/api/v1/filaments/${id}/printer-params?printer_id=${rep}`, { credentials: 'include', signal: getAbortSignal() })
           if (pr.ok) { const pp = await pr.json(); const m = (pp || []).find((x: any) => x.param_key === 'bambu_idx'); currentCode = (m && m.param_value) || '' }
         } catch {}
+        await ensureCodeLabel(rep, currentCode)
         const c = document.getElementById('slicer-profile-picker')!
         c.innerHTML = renderCloudCombobox('bambu_idx', currentCode)
         const combo = c.querySelector('.cloud-combo')
